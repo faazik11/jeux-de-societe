@@ -113,3 +113,16 @@ button.danger { border-color: var(--danger); color: #ffb4b1; }
   from { transform: rotate(-18deg) translateY(-6px) scale(0.95); }
   to { transform: rotate(18deg) translateY(6px) scale(1.05); }
 }
+
+/* Prototype 3D : plein écran */
+.p3d { position: fixed; inset: 0; background: #14151b; }
+#p3d-host { position: absolute; inset: 0; touch-action: none; }
+#p3d-host canvas { display: block; }
+.p3d-top { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 10px; align-items: center; z-index: 3; }
+.p3d-title { color: var(--accent); font-weight: 700; text-shadow: 0 1px 3px #000; }
+.p3d-bottom {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3; width: min(560px, calc(100% - 24px));
+  background: #1b1d24e6; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; text-align: center;
+  backdrop-filter: blur(6px);
+}
+.p3d .dice-overlay { position: absolute; }
