@@ -1,25 +1,20 @@
 // Écran de partie (version simple vue de dessus, en attendant le plateau isométrique).
 // Utilisé à la fois par le mode test local et par le jeu en ligne.
 
+import { IsoBoard } from '../board3d/IsoBoard';
 import {
-  CELLS,
-  CENTER_RECT,
-  DOORS,
   ROOMS,
-  ROOM_RECTS,
   SUSPECTS,
   WEAPONS,
   getAvailableActions,
   getCard,
   getDestinations,
   getPlayerView,
-  posKey,
   type Action,
   type CardId,
   type GameState,
   type LogEntry,
   type PlayerView,
-  type RoomId,
   type SuspectId,
 } from '../engine';
 
@@ -73,44 +68,6 @@ function logLine(v: PlayerView, e: LogEntry): string {
   }
 }
 
-function renderBoard(v: PlayerView, reach: Set<string>): string {
-  const doorKeys = new Set(DOORS.map((d) => `${d.x},${d.y}`));
-  const pawnAt = new Map<string, SuspectId>();
-  for (const s of SUSPECTS) {
-    const p = v.pawns[s.id];
-    if (p.type === 'cell') pawnAt.set(posKey(p), s.id);
-  }
-  let html = '';
-  CELLS.forEach((row, y) =>
-    row.forEach((type, x) => {
-      const key = `${x},${y}`;
-      const cls = ['cell', type];
-      if (doorKeys.has(key)) cls.push('door');
-      if (reach.has(key)) cls.push('reach');
-      const pawn = pawnAt.get(key);
-      html += `<div class="${cls.join(' ')}" data-cell="${key}">${pawn ? `<div class="pawn" style="background:${suspectColor(pawn)}"></div>` : ''}</div>`;
-    }),
-  );
-  const pct = (n: number, total: number) => `${(n / total) * 100}%`;
-  for (const r of ROOMS) {
-    const rect = ROOM_RECTS[r.id as RoomId];
-    const pawns = SUSPECTS.filter((s) => {
-      const p = v.pawns[s.id];
-      return p.type === 'room' && p.room === r.id;
-    });
-    const weapons = WEAPONS.filter((w) => v.weapons[w.id as keyof typeof v.weapons] === r.id);
-    const isReach = reach.has(`room:${r.id}`);
-    html += `<div class="room-label ${isReach ? 'reach' : ''}" data-room="${r.id}"
-      style="left:${pct(rect.x, 24)};top:${pct(rect.y, 25)};width:${pct(rect.w, 24)};height:${pct(rect.h, 25)}">
-      <b>${r.name}</b>
-      <div class="pawns-in-room">${pawns.map((s) => `<div class="pawn" style="background:${s.color}"></div>`).join('')}</div>
-      <div class="weapons-in-room">${weapons.map((w) => w.name).join(', ')}</div>
-    </div>`;
-  }
-  html += `<div class="room-label" style="left:${pct(CENTER_RECT.x, 24)};top:${pct(CENTER_RECT.y, 25)};width:${pct(CENTER_RECT.w, 24)};height:${pct(CENTER_RECT.h, 25)}">?</div>`;
-  return `<div class="board" id="board">${html}</div>`;
-}
-
 function renderNotebook(me: string, v: PlayerView): string {
   const nb = notebooks.get(me) ?? {};
   notebooks.set(me, nb);
@@ -127,6 +84,34 @@ function renderNotebook(me: string, v: PlayerView): string {
     <p class="muted">Touche une case pour cocher : ✗ innocent, ? doute, ✓ coupable.</p>`;
 }
 
+const boards = new WeakMap<HTMLElement, IsoBoard>();
+
+/** Crée la structure de l'écran (une seule fois) et le plateau Phaser. */
+function ensureLayout(el: HTMLElement): IsoBoard {
+  const existing = boards.get(el);
+  if (existing && el.querySelector('#board-host')) return existing;
+  existing?.destroy();
+  el.innerHTML = `
+    <div id="gv-top"></div>
+    <div class="layout">
+      <div class="board-wrap">
+        <div id="board-host"></div>
+        <button class="board-btn" id="recenter" title="Recentrer le plateau">⤢</button>
+      </div>
+      <div id="gv-side"></div>
+    </div>`;
+  const board = IsoBoard.create(el.querySelector<HTMLElement>('#board-host')!);
+  boards.set(el, board);
+  el.querySelector('#recenter')!.addEventListener('click', () => board.recenter());
+  return board;
+}
+
+/** À appeler en quittant l'écran de partie : libère le plateau. */
+export function destroyGameView(el: HTMLElement) {
+  boards.get(el)?.destroy();
+  boards.delete(el);
+}
+
 export function renderGame(el: HTMLElement, o: GameViewOptions) {
   const g = o.state;
   const me = o.me;
@@ -135,7 +120,6 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   const a = getAvailableActions(g, me);
   const mePlayer = v.players.find((p) => p.id === me)!;
   const dests = a.move && !paused ? getDestinations(g) : [];
-  const reach = new Set(dests.map((d) => posKey(d.to)));
   const myPos = v.pawns[mePlayer.suspect];
   const myRoom = myPos.type === 'room' ? myPos.room : null;
   const opts = (items: readonly { id: string; name: string }[]) =>
@@ -185,14 +169,14 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
           <button class="danger" id="accuse">Accuser</button></div></details>` : ''}`;
   }
 
-  // On garde l'état du panneau « Accusation » et la position du journal entre deux affichages
-  const accuseOpen = (el.querySelector('details.panel') as HTMLDetailsElement | null)?.open ?? false;
+  const board = ensureLayout(el);
+  const side = el.querySelector<HTMLElement>('#gv-side')!;
+  el.querySelector<HTMLElement>('#gv-top')!.innerHTML = o.banner ?? '';
 
-  el.innerHTML = `
-    ${o.banner ?? ''}
-    <div class="layout">
-      <div>${renderBoard(v, reach)}</div>
-      <div>
+  // On garde l'état du panneau « Accusation » entre deux affichages
+  const accuseOpen = (side.querySelector('details.panel') as HTMLDetailsElement | null)?.open ?? false;
+
+  side.innerHTML = `
         <div class="panel">
           <h2>${g.phase === 'finished' ? 'Fin de partie' : `Tour ${g.turn} : ${nameOf(g, waitingFor, me)}`}</h2>
           ${controls}
@@ -207,15 +191,20 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
             <span class="muted">${p.handSize} cartes${p.id === g.hostId ? ' · maître de jeu' : ''}${p.eliminated ? ' · éliminé' : ''}</span></div>`).join('')}
         </div>
         <div class="panel"><h2>Journal</h2><div class="log">${[...v.log].reverse().map((e) => `<div>${logLine(v, e)}</div>`).join('')}</div></div>
-        <div class="panel"><h2>Carnet d'enquête</h2>${renderNotebook(me, v)}</div>
-      </div>
-    </div>`;
+        <div class="panel"><h2>Carnet d'enquête</h2>${renderNotebook(me, v)}</div>`;
 
-  const details = el.querySelector('details.panel') as HTMLDetailsElement | null;
+  const details = side.querySelector('details.panel') as HTMLDetailsElement | null;
   if (details && accuseOpen) details.open = true;
 
-  const on = (id: string, fn: () => void) => el.querySelector(`#${id}`)?.addEventListener('click', fn);
-  const val = (id: string) => (el.querySelector(`#${id}`) as HTMLSelectElement).value as never;
+  board.update({
+    state: g,
+    me,
+    destinations: dests,
+    onPick: (dest) => o.act({ type: 'move', player: me, to: dest.to }),
+  });
+
+  const on = (id: string, fn: () => void) => side.querySelector(`#${id}`)?.addEventListener('click', fn);
+  const val = (id: string) => (side.querySelector(`#${id}`) as HTMLSelectElement).value as never;
   on('exit', () => o.onExit?.run());
   on('roll', () => o.act({ type: 'roll', player: me }));
   on('passage', () => o.act({ type: 'secretPassage', player: me }));
@@ -223,19 +212,12 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   on('suggest', () => o.act({ type: 'suggest', player: me, suspect: val('sSus'), weapon: val('sWea') }));
   on('accuse', () => o.act({ type: 'accuse', player: me, suspect: val('aSus'), weapon: val('aWea'), room: val('aRoo') }));
   on('abandon', () => {
-    if (confirmInline(el, 'abandon')) o.act({ type: 'abandon', player: me });
+    if (confirmInline(side, 'abandon')) o.act({ type: 'abandon', player: me });
   });
-  el.querySelectorAll<HTMLElement>('[data-show]').forEach((b) =>
+  side.querySelectorAll<HTMLElement>('[data-show]').forEach((b) =>
     b.addEventListener('click', () => o.act({ type: 'showCard', player: me, card: b.dataset.show as CardId })),
   );
-  el.querySelector('#board')!.addEventListener('click', (ev) => {
-    const target = (ev.target as HTMLElement).closest<HTMLElement>('[data-cell],[data-room]');
-    if (!target) return;
-    const key = target.dataset.cell ?? `room:${target.dataset.room}`;
-    const dest = dests.find((d) => posKey(d.to) === key);
-    if (dest) o.act({ type: 'move', player: me, to: dest.to });
-  });
-  el.querySelectorAll<HTMLElement>('[data-mark]').forEach((td) =>
+  side.querySelectorAll<HTMLElement>('[data-mark]').forEach((td) =>
     td.addEventListener('click', () => {
       const nb = notebooks.get(me)!;
       const cur = MARKS.indexOf(td.textContent ?? '');

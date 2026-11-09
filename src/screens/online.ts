@@ -1,7 +1,7 @@
 // Jeu en ligne : accueil (créer / rejoindre), salon d'attente, partie.
 
 import { SUSPECTS, type SuspectId } from '../games/cluedo/engine';
-import { esc, renderGame } from '../games/cluedo/ui/gameView';
+import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
 import { ensureSignedIn, multiTabTest } from '../online/firebase';
 import {
   chooseSuspect,
@@ -151,11 +151,13 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
   const render = () => {
     const room = lastRoom;
     if (!room) {
+      destroyGameView(app);
       app.innerHTML = `<p>Aucune partie avec le code <b>${esc(code)}</b>.</p><button id="home">← Accueil</button>`;
       app.querySelector('#home')!.addEventListener('click', () => go('#/'));
       return;
     }
     if (!room.players[uid]) {
+      destroyGameView(app);
       app.innerHTML = `<p>${esc(error || 'Tu ne fais pas partie de cette partie.')}</p><button id="home">← Accueil</button>`;
       app.querySelector('#home')!.addEventListener('click', () => go('#/'));
       return;
@@ -185,6 +187,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
   };
 
   const renderLobby = (room: Room) => {
+    destroyGameView(app);
     const isHost = room.hostUid === uid;
     const entries = Object.entries(room.players).sort(([, a], [, b]) => a.joinedAt - b.joinedAt);
     const taken = new Map(entries.map(([id, p]) => [p.suspect, id]));

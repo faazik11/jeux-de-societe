@@ -9,7 +9,7 @@ Site : https://faazik11.github.io/jeux-de-societe/
 - [x] Moteur de règles (cartes, plateau, déplacements, hypothèses, réfutation, accusation, maître de jeu)
 - [x] Page de test locale (tous les joueurs sur le même écran)
 - [x] Jeu en ligne avec Firebase Realtime Database (salons, code de partie, pause, abandon)
-- [ ] Plateau isométrique animé (Phaser)
+- [x] Plateau isométrique animé (Phaser) : décor, pions, déplacements, dés, caméra qui suit le joueur
 - [ ] Thème original et graphismes
 - [ ] Appli installable sur l'écran d'accueil (PWA)
 
@@ -21,7 +21,8 @@ src/games/cluedo/engine/   moteur de règles (TypeScript pur, sans affichage)
   board.ts      plateau : pièces, portes, passages secrets, départs
   movement.ts   calcul des déplacements possibles
   engine.ts     createGame, applyAction, getAvailableActions, getPlayerView
-src/games/cluedo/ui/        écran de partie (vue de dessus provisoire)
+src/games/cluedo/board3d/   plateau isométrique Phaser (IsoBoard.ts) + décor des pièces (decor.ts)
+src/games/cluedo/ui/        écran de partie (plateau + panneau latéral)
 src/online/                 Firebase : connexion, salons, envoi des actions
 src/screens/                accueil, salon d'attente, mode test
 database.rules.json         règles de sécurité de la base Firebase

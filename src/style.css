@@ -82,3 +82,34 @@ button.danger { border-color: var(--danger); color: #ffb4b1; }
 .who { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #000; margin-right: 4px; vertical-align: middle; }
 .error { color: #ffb4b1; min-height: 1.2em; font-size: 0.85rem; }
 .winner { font-size: 1.1rem; padding: 10px; border-radius: 8px; background: #263d26; border: 1px solid #3f6b3f; }
+
+/* Plateau isométrique */
+.board-wrap {
+  position: relative; width: 100%; height: calc(100vh - 110px); min-height: 420px;
+  border-radius: 12px; overflow: hidden; background: #1b1d24; border: 1px solid var(--line);
+  touch-action: none;
+}
+#board-host { position: absolute; inset: 0; }
+#board-host canvas { display: block; }
+@media (max-width: 860px) {
+  .board-wrap { height: 62vh; min-height: 320px; }
+  #gv-side { max-width: 100%; }
+}
+.board-btn {
+  position: absolute; right: 10px; top: 10px; z-index: 3; width: 40px; height: 40px; padding: 0;
+  font-size: 20px; background: #252832cc; backdrop-filter: blur(4px);
+}
+.dice-overlay {
+  position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; gap: 18px;
+  pointer-events: none; opacity: 0; transition: opacity 0.2s;
+}
+.dice-overlay.show { opacity: 1; }
+.die {
+  font-size: 92px; line-height: 1; color: #f7f2e6; text-shadow: 0 6px 18px #000c;
+  filter: drop-shadow(0 4px 8px #0008);
+}
+.die.rolling { animation: dice-shake 0.14s infinite alternate; }
+@keyframes dice-shake {
+  from { transform: rotate(-18deg) translateY(-6px) scale(0.95); }
+  to { transform: rotate(18deg) translateY(6px) scale(1.05); }
+}

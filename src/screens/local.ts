@@ -1,7 +1,7 @@
 // Mode test : tous les joueurs sur le même écran (on se passe le téléphone).
 
 import { RuleError, SUSPECTS, applyAction, createGame, type GameState, type SuspectId } from '../games/cluedo/engine';
-import { esc, renderGame } from '../games/cluedo/ui/gameView';
+import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
 
 export function startLocal(app: HTMLElement, goHome: () => void) {
   let game: GameState | null = null;
@@ -9,6 +9,7 @@ export function startLocal(app: HTMLElement, goHome: () => void) {
   let count = 4;
 
   const setup = () => {
+    destroyGameView(app);
     app.innerHTML = `
       <div class="row"><button id="home">← Accueil</button></div>
       <h1>Mode test (même écran)</h1>

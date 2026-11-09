@@ -3,6 +3,7 @@
 import './style.css';
 import { renderHome, startOnline } from './screens/online';
 import { startLocal } from './screens/local';
+import { destroyGameView } from './games/cluedo/ui/gameView';
 
 const app = document.getElementById('app')!;
 let cleanup: (() => void) | null = null;
@@ -15,6 +16,7 @@ function go(hash: string) {
 function route() {
   cleanup?.();
   cleanup = null;
+  destroyGameView(app);
   const hash = location.hash || '#/';
   const room = hash.match(/^#\/p\/([A-Za-z0-9]{5})$/);
   if (room) cleanup = startOnline(app, room[1], go);
