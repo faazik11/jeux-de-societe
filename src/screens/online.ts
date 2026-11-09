@@ -2,7 +2,7 @@
 
 import { SUSPECTS, type SuspectId } from '../games/cluedo/engine';
 import { esc, renderGame } from '../games/cluedo/ui/gameView';
-import { ensureSignedIn } from '../online/firebase';
+import { ensureSignedIn, multiTabTest } from '../online/firebase';
 import {
   chooseSuspect,
   createRoom,
@@ -18,12 +18,13 @@ import {
 } from '../online/rooms';
 
 const NAME_KEY = 'jds:name';
+const storage = () => (multiTabTest ? sessionStorage : localStorage);
 const store = {
   get: (k: string) => {
-    try { return localStorage.getItem(k); } catch { return null; }
+    try { return storage().getItem(k); } catch { return null; }
   },
   set: (k: string, v: string) => {
-    try { localStorage.setItem(k, v); } catch { /* navigation privée : tant pis */ }
+    try { storage().setItem(k, v); } catch { /* navigation privée : tant pis */ }
   },
 };
 
@@ -188,7 +189,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
     const entries = Object.entries(room.players).sort(([, a], [, b]) => a.joinedAt - b.joinedAt);
     const taken = new Map(entries.map(([id, p]) => [p.suspect, id]));
     const mine = room.players[uid].suspect;
-    const shareUrl = `${location.origin}${location.pathname}#/p/${code}`;
+    const shareUrl = `${location.origin}${location.pathname}${location.search}#/p/${code}`;
     const dupes = entries.length !== new Set(entries.map(([, p]) => p.suspect)).size;
 
     app.innerHTML = `

@@ -3,7 +3,14 @@
 // (voir database.rules.json), qui n'autorisent que les joueurs connectés.
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInAnonymously, type User } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  initializeAuth,
+  onAuthStateChanged,
+  signInAnonymously,
+  type User,
+} from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
@@ -17,7 +24,15 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+/**
+ * Normalement, un appareil = un joueur (identité gardée même après fermeture).
+ * Avec « ?multi » dans l'adresse, chaque onglet devient un joueur différent :
+ * pratique pour tester une partie à plusieurs sur un seul ordinateur.
+ */
+export const multiTabTest = new URLSearchParams(location.search).has('multi');
+export const auth = initializeAuth(app, {
+  persistence: multiTabTest ? browserSessionPersistence : browserLocalPersistence,
+});
 export const db = getDatabase(app);
 
 /** Connexion anonyme : chaque appareil reçoit un identifiant stable, sans créer de compte. */
