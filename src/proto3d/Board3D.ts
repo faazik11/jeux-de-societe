@@ -474,6 +474,29 @@ export class Board3D {
     this.host.dispatchEvent(new CustomEvent('cammode', { detail: mode }));
   }
 
+  /** Intro : la caméra fait le tour du plateau en descendant, pour montrer le relief. */
+  intro(duration = 6): Promise<void> {
+    return new Promise((resolve) => {
+      let t = 0;
+      const tick = (dt: number) => {
+        t += dt / duration;
+        const k = Math.min(1, t);
+        const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+        const angle = Math.PI * 1.25 + ease * Math.PI * 2;
+        const radius = 22 - ease * 6;
+        const height = 16 - ease * 9;
+        this.camGoal.pos.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
+        this.camGoal.look.set(0, 0.5, 0);
+        this.camGoal.speed = 8;
+        if (k >= 1) {
+          this.tickers.delete(tick);
+          resolve();
+        }
+      };
+      this.tickers.add(tick);
+    });
+  }
+
   /** Vue d'ensemble légèrement inclinée. */
   overview(speed = 2) {
     this.follow = null;

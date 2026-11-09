@@ -119,7 +119,9 @@ export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
       camBtn.textContent = (e as CustomEvent).detail === 'auto' ? '🎥 Caméra auto' : '🖐 Caméra libre';
     });
     for (const s of SUSPECTS) board.place(s.id, game.pawns[s.id]);
-    setTimeout(() => !destroyed && showTurn(), 900);
+    info.innerHTML = 'Vraie 3D : fais glisser pour tourner autour du plateau, pince pour zoomer.';
+    await board.intro();
+    if (!destroyed) showTurn();
   })();
 
   return () => {
