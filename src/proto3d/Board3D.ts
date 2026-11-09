@@ -20,7 +20,9 @@ import {
   type SuspectId,
 } from '../games/cluedo/engine';
 import { DECOR, FLOOR, WALL, type DecorItem } from '../games/cluedo/board3d/decor';
-import { makeFigure, type Figure } from './figure';
+import { type Figure } from './figure';
+import { loadCharacter } from './characters';
+import { Dice3D } from './dice3d';
 
 const Z = 1.45 / WALL.height; // conversion hauteur « pixels » du décor -> unités 3D
 const WALL_H = 1.45;
@@ -59,7 +61,11 @@ export class Board3D {
   private raf = 0;
   private ro: ResizeObserver;
 
-  private figures = new Map<SuspectId, Figure>();
+  private figures = new Map<SuspectId, Figure & { emote(name: string): void }>();
+  private pending = new Map<SuspectId, Position>();
+  private dice!: Dice3D;
+  /** Se résout quand les personnages 3D sont chargés. */
+  ready: Promise<void>;
   private walking = new Set<SuspectId>();
   private walls: WallSeg[] = [];
   private highlight = new THREE.Group();
@@ -112,12 +118,23 @@ export class Board3D {
     this.ring.position.y = 0.02;
     this.scene.add(this.ring);
 
-    for (const s of SUSPECTS) {
-      const f = makeFigure(parseInt(s.color.slice(1), 16));
-      f.root.scale.setScalar(0.9);
-      this.scene.add(f.root);
-      this.figures.set(s.id, f);
-    }
+    this.ready = Promise.all(
+      SUSPECTS.map(async (s) => {
+        const f = await loadCharacter(s.id, parseInt(s.color.slice(1), 16));
+        this.scene.add(f.root);
+        this.figures.set(s.id, f);
+        const p = this.pending.get(s.id);
+        if (p) this.place(s.id, p);
+      }),
+    ).then(() => undefined);
+
+    const c = CENTER_RECT;
+    this.dice = new Dice3D(this.scene, {
+      center: world(c.x + c.w / 2, c.y + c.h / 2),
+      halfX: (c.w - 0.5) / 2,
+      halfZ: (c.h - 0.5) / 2,
+      y: 0.3,
+    });
 
     this.setupPicking();
     this.ro = new ResizeObserver(() => this.resize());
@@ -204,7 +221,7 @@ export class Board3D {
     plinth.castShadow = plinth.receiveShadow = true;
     this.scene.add(plinth);
     const env = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.04, 0.95), this.mat(0xe9dcc0));
-    env.position.copy(world(c.x + c.w / 2, c.y + c.h / 2, 0.33));
+    env.position.copy(world(c.x + c.w / 2 + 1.2, c.y + 1.1, 0.33));
     env.rotation.y = 0.25;
     env.castShadow = true;
     this.scene.add(env);
@@ -212,7 +229,7 @@ export class Board3D {
     seal.position.copy(env.position).add(new THREE.Vector3(0, 0.035, 0));
     this.scene.add(seal);
     const q = this.label('?', 96, '#c9a24a');
-    q.position.copy(world(c.x + c.w / 2, c.y + c.h / 2, 1.1));
+    q.position.copy(world(c.x + c.w / 2 + 1.2, c.y + 1.1, 1.1));
     q.scale.set(0.9, 0.9, 1);
     this.scene.add(q);
 
@@ -383,9 +400,33 @@ export class Board3D {
   // ------------------------------------------------------------------ Pions
 
   place(s: SuspectId, p: Position) {
+    const f = this.figures.get(s);
+    if (!f) {
+      this.pending.set(s, p);
+      return;
+    }
     const g = gridOf(p, s);
-    const f = this.figures.get(s)!;
     f.root.position.copy(world(g.x, g.y));
+    f.root.rotation.y = 0;
+  }
+
+  emote(s: SuspectId, name = 'emote-yes') {
+    this.figures.get(s)?.emote(name);
+  }
+
+  /** Lance les dés 3D sur la table centrale. */
+  async rollDice(values: number[]) {
+    const c = CENTER_RECT;
+    const center = world(c.x + c.w / 2, c.y + c.h / 2);
+    if (this.mode === 'auto') {
+      this.follow = null;
+      this.camGoal.pos.copy(center).add(new THREE.Vector3(0, 5.2, 5.4));
+      this.camGoal.look.copy(center);
+      this.camGoal.speed = 3;
+    }
+    await this.dice.roll(values, (p) => {
+      if (this.mode === 'auto') this.camGoal.look.lerp(p, 0.08);
+    });
   }
 
   /** Fait marcher un personnage le long d'un chemin, case par case. */

@@ -17,6 +17,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "cannon-es": "^0.20.0",
     "firebase": "^11.10.0",
     "phaser": "^3.90.0",
     "three": "^0.170.0"
