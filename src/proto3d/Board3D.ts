@@ -23,6 +23,7 @@ import { DECOR, FLOOR, WALL, type DecorItem } from '../games/cluedo/board3d/deco
 import { type Figure } from './figure';
 import { loadCharacter } from './characters';
 import { Dice3D } from './dice3d';
+import { buildFurniture } from './furniture3d';
 
 const Z = 1.45 / WALL.height; // conversion hauteur « pixels » du décor -> unités 3D
 const WALL_H = 1.45;
@@ -66,6 +67,7 @@ export class Board3D {
   private dice!: Dice3D;
   /** Se résout quand les personnages 3D sont chargés. */
   ready: Promise<void>;
+  private furnitureReady: Promise<void> = Promise.resolve();
   private walking = new Set<SuspectId>();
   private walls: WallSeg[] = [];
   private highlight = new THREE.Group();
@@ -126,7 +128,7 @@ export class Board3D {
         const p = this.pending.get(s.id);
         if (p) this.place(s.id, p);
       }),
-    ).then(() => undefined);
+    ).then(() => this.furnitureReady);
 
     const c = CENTER_RECT;
     this.dice = new Dice3D(this.scene, {
@@ -212,7 +214,16 @@ export class Board3D {
     }
 
     for (const r of ROOMS) this.buildWalls(r.id as RoomId);
-    for (const items of Object.values(DECOR)) for (const it of items) this.buildDecor(it);
+    // Décor : on garde les tapis, la cheminée et le billard ; le reste vient du Furniture Kit
+    for (const [room, items] of Object.entries(DECOR) as [RoomId, DecorItem[]][]) {
+      for (const it of items) {
+        if (it.kind === 'rug' || it.kind === 'fire') this.buildDecor(it);
+        else if (room === 'salon' && it.kind === 'box' && it.h === 28) this.buildDecor(it); // cheminée
+        else if (room === 'bibliotheque' && it.kind === 'box' && it.stripes) this.buildDecor(it); // étagères pleines de livres
+        else if (room === 'billard' && it.x < 23) this.buildDecor({ ...it, y: it.y - 0.3 }); // table de billard
+      }
+    }
+    this.furnitureReady = buildFurniture(this.scene, (x, y, h = 0) => world(x, y, h));
 
     // Centre : l'enveloppe
     const c = CENTER_RECT;
