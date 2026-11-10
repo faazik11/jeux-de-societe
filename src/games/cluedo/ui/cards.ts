@@ -11,11 +11,11 @@ import { customImages } from './customImages';
 const BUNDLED = new Set([
   'rouge', 'jaune', 'blanc', 'vert', 'bleu', 'violet',
   'chandelier', 'poignard', 'tuyau', 'revolver', 'corde', 'cle',
-  'cuisine', 'bal', 'veranda', 'salleAManger', 'billard', 'bibliotheque', 'salon', 'hall',
+  'cuisine', 'bal', 'veranda', 'salleAManger', 'billard', 'bibliotheque', 'salon', 'hall', 'bureau',
 ]);
 
 /** Point de cadrage des illustrations paysage (sujet principal), en % horizontal. */
-const FOCUS: Record<string, number> = { hall: 32, salon: 50, bibliotheque: 45, cuisine: 50, billard: 55, veranda: 50, bal: 60, salleAManger: 45 };
+const FOCUS: Record<string, number> = { hall: 32, salon: 50, bibliotheque: 45, cuisine: 50, billard: 55, bureau: 45, veranda: 50, bal: 60, salleAManger: 45 };
 
 /** Image à afficher pour une carte : photo du joueur, sinon illustration du jeu, sinon rien (dessin). */
 export function cardImage(id: string): string | null {
