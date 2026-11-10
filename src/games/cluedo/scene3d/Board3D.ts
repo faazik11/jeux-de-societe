@@ -30,7 +30,7 @@ import { makeWeapon } from './weapons3d';
 import { Dice3D } from './dice3d';
 import { buildFurniture } from './furniture3d';
 import { CHARTE } from '../../../theme/charte';
-import { cardSVG } from '../ui/cards';
+import { CARD_PIC_RECT, cardFocus, cardImage, cardSVG } from '../ui/cards';
 
 const P = CHARTE.plateau;
 
@@ -824,14 +824,43 @@ export class Board3D {
     g.fillRect(0, 0, 512, 720);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
-    const img = new Image();
-    const url = URL.createObjectURL(new Blob([cardSVG(id)], { type: 'image/svg+xml' }));
-    img.onload = () => {
-      g.drawImage(img, 0, 0, 512, 720);
-      t.needsUpdate = true;
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
+    const photo = cardImage(id);
+    const load = (src: string) =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+    const url = URL.createObjectURL(new Blob([cardSVG(id, { noArt: !!photo })], { type: 'image/svg+xml' }));
+    void (async () => {
+      try {
+        g.drawImage(await load(url), 0, 0, 512, 720);
+        if (photo) {
+          // Photo recadrée au centre (comme object-fit: cover), coins arrondis, liseré doré
+          const img = await load(photo);
+          const r = { x: CARD_PIC_RECT.x * 2, y: CARD_PIC_RECT.y * 2, w: CARD_PIC_RECT.w * 2, h: CARD_PIC_RECT.h * 2 };
+          const k = Math.max(r.w / img.width, r.h / img.height);
+          const sw = r.w / k, sh = r.h / k;
+          g.save();
+          g.beginPath();
+          g.roundRect(r.x, r.y, r.w, r.h, 14);
+          g.clip();
+          g.drawImage(img, (img.width - sw) * cardFocus(id), (img.height - sh) / 2, sw, sh, r.x, r.y, r.w, r.h);
+          g.restore();
+          g.strokeStyle = '#c9a24a';
+          g.lineWidth = 6;
+          g.beginPath();
+          g.roundRect(r.x, r.y, r.w, r.h, 14);
+          g.stroke();
+        }
+        t.needsUpdate = true;
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    })();
     return t;
   }
 

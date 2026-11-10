@@ -7,6 +7,21 @@
 import { SUSPECTS, getCard, type CardId } from '../engine';
 import { customImages } from './customImages';
 
+/** Illustrations peintes livrées avec le jeu (public/cards). Les cartes absentes gardent leur dessin. */
+const BUNDLED = new Set([
+  'rouge', 'jaune', 'blanc', 'vert', 'bleu', 'violet',
+  'chandelier', 'poignard', 'tuyau', 'revolver', 'corde', 'cle',
+  'cuisine', 'bal', 'veranda', 'salleAManger', 'billard', 'bibliotheque', 'salon', 'hall',
+]);
+
+/** Point de cadrage des illustrations paysage (sujet principal), en % horizontal. */
+const FOCUS: Record<string, number> = { hall: 32, salon: 50, bibliotheque: 45, cuisine: 50, billard: 55, veranda: 50, bal: 60, salleAManger: 45 };
+
+/** Image à afficher pour une carte : photo du joueur, sinon illustration du jeu, sinon rien (dessin). */
+export function cardImage(id: string): string | null {
+  return customImages.get(id) ?? (BUNDLED.has(id) ? `${import.meta.env.BASE_URL}cards/${id}.webp` : null);
+}
+
 const KIND_LABEL = { suspect: 'Suspect', weapon: 'Arme', room: 'Pièce' } as const;
 
 let uid = 0;
@@ -211,9 +226,10 @@ export function cardHTML(id: CardId, o: CardOptions = {}): string {
     plate = `<span class="gc-title">${s.title}</span><span class="gc-surname">${s.surname}</span>`;
   } else if (c.kind === 'weapon') art = weaponArt(id);
   else art = roomArt(id);
-  const photo = customImages.get(id);
-  if (photo) art = `<img class="gc-photo" src="${photo}" alt="">`;
-  const cls = ['gcard', c.kind, o.size ?? 'md', o.selected ? 'selected' : '', o.dim ? 'dim' : ''].join(' ');
+  const photo = cardImage(id);
+  const focus = !customImages.has(id) && FOCUS[id] !== undefined ? ` style="object-position:${FOCUS[id]}% 50%"` : '';
+  if (photo) art = `<img class="gc-photo" src="${photo}" alt="" draggable="false"${focus}>`;
+  const cls = ['gcard', c.kind, photo ? 'has-photo' : '', o.size ?? 'md', o.selected ? 'selected' : '', o.dim ? 'dim' : ''].join(' ');
   return `<div class="${cls}" ${o.attrs ?? ''}>
     <div class="gc-type">❦ ${KIND_LABEL[c.kind]} ❦</div>
     <div class="gc-pic">${art}</div>
@@ -231,13 +247,17 @@ const BAND = { suspect: '#7a1f2b', weapon: '#4b5560', room: '#2f5a43' } as const
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
 /** La même carte en SVG autonome (256×360), pour la texture des cartes 3D. */
-export function cardSVG(id: CardId): string {
+/** Zone de l'image dans cardSVG (pour y dessiner une photo). */
+export const cardFocus = (id: string) => (!customImages.has(id) && FOCUS[id] !== undefined ? FOCUS[id] / 100 : 0.5);
+
+export const CARD_PIC_RECT = { x: 22, y: 54, w: 212, h: 222 };
+
+export function cardSVG(id: CardId, opts: { noArt?: boolean } = {}): string {
   const c = getCard(id);
   const s = c.kind === 'suspect' ? SUSPECTS.find((x) => x.id === id)! : null;
   const art = s ? suspectArt(id, s.color) : c.kind === 'weapon' ? weaponArt(id) : roomArt(id);
-  const photo = customImages.get(id);
-  const inner = photo
-    ? `<clipPath id="ph"><rect x="26" y="54" width="204" height="222" rx="8"/></clipPath><image href="${photo}" x="26" y="54" width="204" height="222" preserveAspectRatio="xMidYMid slice" clip-path="url(#ph)"/><rect x="26" y="54" width="204" height="222" rx="8" fill="none" stroke="#c9a24a" stroke-width="4"/>`
+  const inner = opts.noArt
+    ? ''
     : art.replace('<svg viewBox="0 0 100 120" class="gc-art">', '<svg x="38" y="62" width="180" height="216" viewBox="0 0 100 120">');
   const serif = `font-family="'Playfair Display', Georgia, serif"`;
   const surname = s ? s.surname : c.name;
@@ -260,7 +280,7 @@ export function cardSVG(id: CardId): string {
 /** Portrait seul (médaillon), pour la barre des joueurs et les annonces. */
 export function portraitHTML(id: CardId): string {
   const s = SUSPECTS.find((x) => x.id === id);
-  const photo = customImages.get(id);
+  const photo = cardImage(id);
   if (s && photo) return `<img class="portrait photo" src="${photo}" alt="" style="border-color:${s.color}">`;
   return s ? suspectArt(id, s.color).replace('class="gc-art"', 'class="portrait"') : '';
 }

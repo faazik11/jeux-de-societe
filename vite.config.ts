@@ -27,7 +27,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,svg,glb,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,png,svg,glb,webmanifest,webp}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: '/jeux-de-societe/index.html',
       },

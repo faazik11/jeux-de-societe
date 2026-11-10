@@ -382,3 +382,5 @@ button.pill.danger { background: linear-gradient(180deg, var(--velvet-light), va
 .img-slot .gcard { cursor: pointer; }
 .img-slot button { font-size: 12px; padding: 3px 10px; }
 .img-kind { margin: 10px 0 0; font-family: var(--font-title); color: var(--accent-light); }
+/* Pièces : l'image paysage remplit le cadre, recadrée sur le sujet */
+.gcard.has-photo .gc-photo { -webkit-user-drag: none; }

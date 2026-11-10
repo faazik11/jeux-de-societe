@@ -589,11 +589,11 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
         `<h3 class="img-kind">${title}</h3><div class="img-grid">${list
           .map(
             (c) => `<div class="img-slot">${cardHTML(c.id as CardId, { size: 'md', attrs: `data-img="${c.id}"` })}
-              ${customImages.has(c.id) ? `<button data-img-del="${c.id}">Remettre le dessin</button>` : '<span class="muted" style="font-size:12px">Touche pour une photo</span>'}</div>`,
+              ${customImages.has(c.id) ? `<button data-img-del="${c.id}">Image d'origine</button>` : '<span class="muted" style="font-size:12px">Touche pour une photo</span>'}</div>`,
           )
           .join('')}</div>`;
       content = `<h2>Mes images</h2>
-        <p class="muted">Touche une carte pour choisir une photo (par exemple celles de ta boîte de jeu). Les photos restent sur cet appareil : elles ne sont envoyées nulle part, et les autres joueurs voient leurs propres images.</p>
+        <p class="muted">Touche une carte pour la remplacer par une photo de ton téléphone. Les photos restent sur cet appareil : elles ne sont envoyées nulle part, et les autres joueurs voient leurs propres images.</p>
         <input type="file" accept="image/*" id="img-file" hidden>
         ${group('Suspects', SUSPECTS)}${group('Armes', WEAPONS)}${group('Pièces', ROOMS)}`;
       break;
