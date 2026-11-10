@@ -1,6 +1,7 @@
-// Prototype de plateau en vraie 3D (Three.js).
-// Reprend le même plateau (pièces, portes, décor) que la version isométrique,
-// avec lumières, ombres, personnages animés et une caméra qui change d'angle.
+// Plateau en vraie 3D (Three.js) : la scène et ses « briques » d'animation.
+// Ce fichier ne connaît pas les règles : il sait construire le plateau, déplacer les pions,
+// lancer les dés, cadrer la caméra et jouer les mises en scène.
+// C'est Board3DView qui décide quoi jouer à partir du journal de la partie.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -20,8 +21,8 @@ import {
   type SuspectId,
   type WeaponId,
   WEAPONS,
-} from '../games/cluedo/engine';
-import { DECOR, FLOOR, WALL, type DecorItem } from '../games/cluedo/board3d/decor';
+} from '../engine';
+import { DECOR, FLOOR, WALL, type DecorItem } from '../board3d/decor';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { makeFigure, type Figure } from './figure';
 import { makeWeapon } from './weapons3d';
@@ -54,7 +55,6 @@ function gridOf(p: Position, s: SuspectId) {
   return p.type === 'cell' ? { x: p.x + 0.5, y: p.y + 0.5 } : roomSlot(p.room, s);
 }
 
-type CamMode = 'auto' | 'free';
 
 interface Door {
   pivot: THREE.Group;
@@ -79,24 +79,35 @@ export class Board3D {
   private envMap: THREE.Texture | null = null;
   private pathGroup = new THREE.Group();
   private hoverKey: string | null = null;
-  private pending = new Map<SuspectId, Position>();
   private dice!: Dice3D;
-  /** Se résout quand les personnages 3D sont chargés. */
+  /** Se résout quand les meubles sont chargés. */
   ready: Promise<void>;
   private furnitureReady: Promise<void> = Promise.resolve();
   private walking = new Set<SuspectId>();
+  private positions = new Map<SuspectId, Position>();
+  private envelope!: { group: THREE.Group; flap: THREE.Group; light: THREE.PointLight; mark: THREE.Sprite };
+  private cards = new THREE.Group();
   private highlight = new THREE.Group();
   private ring: THREE.Mesh;
   private fireLight: THREE.PointLight | null = null;
   private reach = new Map<string, Destination>();
   private onPick: ((d: Destination) => void) | null = null;
 
-  // Caméra automatique : position et cible visées, vers lesquelles on glisse en douceur
-  mode: CamMode = 'auto';
-  private camGoal = { pos: new THREE.Vector3(0, 20, 18), look: new THREE.Vector3(0, 0, 0), speed: 2.5 };
-  private camLook = new THREE.Vector3();
-  private follow: SuspectId | null = null;
-  private followEnabled = true;
+  // Caméra automatique : position et cible visées, vers lesquelles on glisse en douceur.
+  // Orientation fixe : on regarde toujours le plateau depuis le sud, comme assis à la table.
+  private camGoal = { pos: new THREE.Vector3(0, 27, 21), look: new THREE.Vector3(0, 0, 1), speed: 2.5 };
+  private camLook = new THREE.Vector3(0, 0, 1);
+  private follow: { s: SuspectId; back: boolean; far: boolean } | null = null;
+  private orbit: { center: THREE.Vector3; angle: number; radius: number; height: number } | null = null;
+  /** Vrai quand le joueur a pris la main sur la caméra (glisser, pincer). */
+  userCamera = false;
+  /** Accélération des animations (1 = normal ; plus grand = plus rapide). */
+  timeScale = 1;
+  /** Accélération ponctuelle quand on touche l'écran pendant une animation. */
+  private boost = 1;
+  /** Appelé quand le joueur reprend la main sur la caméra ou la rend. */
+  onUserCamera: ((user: boolean) => void) | null = null;
+  private tickers = new Set<(dt: number) => void>();
 
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -117,10 +128,19 @@ export class Board3D {
     this.controls.maxPolarAngle = Math.PI * 0.44;
     this.controls.minDistance = 4;
     this.controls.maxDistance = 45;
-    this.controls.enabled = false;
-    this.controls.addEventListener('start', () => {
-      // Dès que le joueur touche la caméra, on passe en vue libre
-      if (this.mode === 'auto') this.setMode('free');
+    this.controls.enabled = true;
+    // Dès que le joueur bouge vraiment la caméra (glisser, pincer, molette), on arrête de la piloter.
+    // Un simple toucher (pour choisir une case) ne compte pas.
+    let interacting = false;
+    this.controls.addEventListener('start', () => (interacting = true));
+    this.controls.addEventListener('end', () => (interacting = false));
+    this.controls.addEventListener('change', () => {
+      if (interacting && !this.userCamera) {
+        this.userCamera = true;
+        this.follow = null;
+        this.orbit = null;
+        this.onUserCamera?.(true);
+      }
     });
 
     // Reflets pour les armes en métal
@@ -152,19 +172,16 @@ export class Board3D {
     }
     this.ready = this.furnitureReady;
 
-    const c = CENTER_RECT;
-    this.dice = new Dice3D(this.scene, {
-      center: world(c.x + c.w / 2, c.y + c.h / 2),
-      halfX: (c.w - 0.5) / 2,
-      halfZ: (c.h - 0.5) / 2,
-      y: 0.3,
-    });
+    this.dice = new Dice3D(this.scene, (fn) => this.tickers.add(fn), (fn) => this.tickers.delete(fn));
+    this.buildEnvelope();
+    this.scene.add(this.cards);
 
     this.setupPicking();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(host);
     this.resize();
-    this.overview(0);
+    this.tableView(0);
+    this.camera.position.copy(this.camGoal.pos);
     this.loop();
   }
 
@@ -253,18 +270,6 @@ export class Board3D {
     plinth.position.copy(world(c.x + c.w / 2, c.y + c.h / 2, 0.15));
     plinth.castShadow = plinth.receiveShadow = true;
     this.scene.add(plinth);
-    const env = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.04, 0.95), this.mat(0xe9dcc0));
-    env.position.copy(world(c.x + c.w / 2 + 1.2, c.y + 1.1, 0.33));
-    env.rotation.y = 0.25;
-    env.castShadow = true;
-    this.scene.add(env);
-    const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.03, 16), this.mat(0x8c1d1d, 0.4));
-    seal.position.copy(env.position).add(new THREE.Vector3(0, 0.035, 0));
-    this.scene.add(seal);
-    const q = this.label('?', 96, '#c9a24a');
-    q.position.copy(world(c.x + c.w / 2 + 1.2, c.y + 1.1, 1.1));
-    q.scale.set(0.9, 0.9, 1);
-    this.scene.add(q);
 
     // Noms des pièces
     for (const r of ROOMS) {
@@ -315,6 +320,7 @@ export class Board3D {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
       const c = world(x, y, 0);
       mesh.position.set(c.x, y0 + h / 2, c.z);
+      if (y0 === 0) this.wallBoxes.push({ center: mesh.position.clone(), size: new THREE.Vector3(w, h, d) });
       mesh.castShadow = mesh.receiveShadow = true;
       this.scene.add(mesh);
     };
@@ -333,6 +339,8 @@ export class Board3D {
     for (const d of DOORS.filter((dd) => dd.room === room)) this.buildDoor(d.x, d.y, room, add);
   }
 
+  /** Murs (pour que les dés rebondissent dessus au lieu de les traverser). */
+  private wallBoxes: { center: THREE.Vector3; size: THREE.Vector3 }[] = [];
   private wallMat = new THREE.MeshStandardMaterial({ color: WALL.color, roughness: 0.9 });
   private doorMat = new THREE.MeshStandardMaterial({ color: 0x7a4a26, roughness: 0.6 });
   private frameMat = new THREE.MeshStandardMaterial({ color: 0x4e2f18, roughness: 0.6 });
@@ -509,17 +517,81 @@ export class Board3D {
     }
   }
 
-  // ------------------------------------------------------------------ Pions
+  // ------------------------------------------------------------------ Temps et petites animations
+
+  /** Attend `ms` millisecondes « de jeu » (plus court si les animations sont accélérées). */
+  wait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      let t = 0;
+      const fn = (dt: number) => {
+        t += dt * 1000;
+        if (t >= ms) {
+          this.tickers.delete(fn);
+          resolve();
+        }
+      };
+      this.tickers.add(fn);
+    });
+  }
+
+  /** Anime `fn(k)` avec k allant de 0 à 1 en `ms` millisecondes. */
+  private tween(ms: number, fn: (k: number) => void): Promise<void> {
+    return new Promise((resolve) => {
+      let t = 0;
+      const tick = (dt: number) => {
+        t += (dt * 1000) / ms;
+        const k = Math.min(1, t);
+        fn(k);
+        if (k >= 1) {
+          this.tickers.delete(tick);
+          resolve();
+        }
+      };
+      this.tickers.add(tick);
+    });
+  }
+
+  /** Toucher l'écran pendant une animation l'accélère. */
+  speedUp() {
+    this.boost = 6;
+  }
+
+  private sparkle(at: THREE.Vector3, color = 0xfff2b0) {
+    const geo = new THREE.SphereGeometry(0.035, 6, 4);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true });
+    for (let i = 0; i < 16; i++) {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.copy(at);
+      const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize();
+      this.scene.add(m);
+      void this.tween(600, (k) => {
+        m.position.copy(at).addScaledVector(dir, k * 0.7);
+        mat.opacity = 1 - k;
+        if (k >= 1) this.scene.remove(m);
+      });
+    }
+  }
+
+  // ------------------------------------------------------------------ Pions et armes
 
   place(s: SuspectId, p: Position) {
-    const f = this.figures.get(s);
-    if (!f) {
-      this.pending.set(s, p);
-      return;
-    }
+    const f = this.figures.get(s)!;
     const g = gridOf(p, s);
     f.root.position.copy(world(g.x, g.y));
     f.root.rotation.y = 0;
+    f.root.visible = true;
+    f.root.scale.setScalar(1);
+    this.positions.set(s, p);
+  }
+
+  /** Point 3D d'une position du plateau (pour cadrer la caméra). */
+  pointOf(p: Position, s: SuspectId): THREE.Vector3 {
+    const g = gridOf(p, s);
+    return world(g.x, g.y);
+  }
+
+  pawnPoint(s: SuspectId): THREE.Vector3 {
+    return this.figures.get(s)!.root.position.clone();
   }
 
   emote(s: SuspectId) {
@@ -534,26 +606,31 @@ export class Board3D {
     m.visible = true;
   }
 
-  /** Lance les dés 3D sur la table centrale. */
-  async rollDice(values: number[]) {
-    const c = CENTER_RECT;
-    const center = world(c.x + c.w / 2, c.y + c.h / 2);
-    if (this.mode === 'auto') {
+  /** Lance les dés juste devant le pion du joueur. */
+  async rollDice(values: number[], near: SuspectId) {
+    const p = this.pawnPoint(near);
+    // Zone de lancer devant le pion (côté caméra), gardée sur le plateau
+    const cx = THREE.MathUtils.clamp(p.x, OX + 1.4, -OX - 1.4);
+    const cz = THREE.MathUtils.clamp(p.z + 1.3, OZ + 1.4, -OZ - 1.4);
+    const center = new THREE.Vector3(cx, 0, cz);
+    if (!this.userCamera) {
       this.follow = null;
-      this.camGoal.pos.copy(center).add(new THREE.Vector3(0, 5.2, 5.4));
-      this.camGoal.look.copy(center);
-      this.camGoal.speed = 3;
+      this.orbit = null;
+      this.lookFrom(center, 6.5, 2.6);
     }
-    await this.dice.roll(values, (p) => {
-      if (this.mode === 'auto') this.camGoal.look.lerp(p, 0.08);
+    const walls = this.wallBoxes.filter((b) => Math.abs(b.center.x - cx) < 3 && Math.abs(b.center.z - cz) < 3);
+    await this.dice.roll(values, { center, halfX: 1.1, halfZ: 1.0, y: 0.04, obstacles: walls }, (c) => {
+      if (!this.userCamera) this.camGoal.look.lerp(c, 0.06);
     });
   }
 
-  /** Fait marcher un personnage le long d'un chemin, case par case. */
-  walk(s: SuspectId, path: Position[]): Promise<void> {
+  clearDice() {
+    this.dice.clear();
+  }
+
+  /** Fait marcher un personnage le long d'un chemin, case par case, en ouvrant les portes. */
+  walk(s: SuspectId, path: Position[], camera: 'none' | 'follow' | 'back' | 'far' = 'follow'): Promise<void> {
     const f = this.figures.get(s)!;
-    // Points de passage : on ajoute la case juste derrière la porte pour ne pas traverser les murs,
-    // et on ouvre la porte au bon moment.
     const points: { p: THREE.Vector3; door?: string }[] = [];
     const opened: string[] = [];
     for (let i = 1; i < path.length; i++) {
@@ -569,39 +646,38 @@ export class Board3D {
         const door = this.doors.get(key);
         if (door) points.push({ p: world(door.inside.x + 0.5, door.inside.y + 0.5), door: key });
         opened.push(key);
-        const g = gridOf(b, s);
-        points.push({ p: world(g.x, g.y) });
-        continue;
       }
       const g = gridOf(b, s);
       points.push({ p: world(g.x, g.y) });
     }
     this.walking.add(s);
-    if (this.mode === 'auto' && this.followEnabled) this.follow = s;
-    const SPEED = 2.6; // cases par seconde
+    if (camera !== 'none' && !this.userCamera) {
+      this.orbit = null;
+      this.follow = { s, back: camera === 'back', far: camera === 'far' };
+    }
+    const SPEED = 2.8; // cases par seconde
     return new Promise((resolve) => {
       let i = 0;
       const step = () => {
         if (i >= points.length) {
           this.walking.delete(s);
-          this.follow = null;
-          setTimeout(() => opened.forEach((k) => this.openDoor(k, false)), 500);
+          if (this.follow?.s === s) this.follow = null;
+          void this.wait(450).then(() => opened.forEach((k) => this.openDoor(k, false)));
+          this.positions.set(s, path[path.length - 1]);
           return resolve();
         }
-        const from = f.root.position.clone();
         const pt = points[i++];
         if (pt.door) this.openDoor(pt.door, true);
+        const from = f.root.position.clone();
         const to = pt.p;
-        const dist = from.distanceTo(to);
-        const dur = Math.max(0.12, dist / SPEED);
-        const targetYaw = Math.atan2(to.x - from.x, to.z - from.z);
+        const dur = Math.max(0.1, from.distanceTo(to) / SPEED);
+        const yaw = Math.atan2(to.x - from.x, to.z - from.z);
         let t = 0;
         const tick = (dt: number) => {
           t += dt / dur;
           const k = Math.min(1, t);
           f.root.position.lerpVectors(from, to, k);
-          // tourner doucement dans la direction de la marche
-          let d = targetYaw - f.root.rotation.y;
+          let d = yaw - f.root.rotation.y;
           d = Math.atan2(Math.sin(d), Math.cos(d));
           f.root.rotation.y += d * Math.min(1, dt * 12);
           if (k >= 1) {
@@ -615,31 +691,255 @@ export class Board3D {
     });
   }
 
-  private tickers = new Set<(dt: number) => void>();
+  /** Le pion disparaît dans un éclat de lumière et réapparaît ailleurs (hypothèse). */
+  async teleport(s: SuspectId, to: Position) {
+    const f = this.figures.get(s)!.root;
+    const g = gridOf(to, s);
+    const dest = world(g.x, g.y);
+    if (f.position.distanceTo(dest) < 0.01) return;
+    this.sparkle(f.position.clone().add(new THREE.Vector3(0, 0.6, 0)));
+    await this.tween(300, (k) => f.scale.set(1 - k * 0.8, 1 + k * 0.8, 1 - k * 0.8));
+    f.visible = false;
+    f.position.copy(dest);
+    f.rotation.y = 0;
+    this.positions.set(s, to);
+    await this.wait(150);
+    f.visible = true;
+    this.sparkle(dest.clone().add(new THREE.Vector3(0, 0.6, 0)));
+    await this.tween(350, (k) => {
+      const e = 1 + Math.sin(k * Math.PI) * 0.15;
+      const v = 0.2 + k * 0.8;
+      f.scale.set(v * e, (1.6 - k * 0.6) , v * e);
+    });
+    f.scale.setScalar(1);
+  }
+
+  /** L'arme tombe du ciel dans la pièce et rebondit. */
+  async dropWeapon(w: WeaponId, room: RoomId) {
+    const m = this.weapons.get(w)!;
+    const g = weaponSlot(room, w);
+    const dest = world(g.x, g.y);
+    if (m.visible && m.position.distanceTo(dest) < 0.01) return;
+    m.visible = true;
+    m.position.copy(dest).add(new THREE.Vector3(0, 2.5, 0));
+    await this.tween(700, (k) => {
+      // chute + petit rebond
+      const y = k < 0.7 ? 2.5 * (1 - (k / 0.7) ** 2) : Math.sin(((k - 0.7) / 0.3) * Math.PI) * 0.18;
+      m.position.y = Math.max(0, y);
+      m.rotation.y += 0.15;
+    });
+    m.position.copy(dest);
+    this.sparkle(dest.clone().add(new THREE.Vector3(0, 0.1, 0)), 0xdfe6ee);
+  }
+
+  /** Passage secret : le pion descend par une trappe et remonte dans l'autre pièce. */
+  async secretPassage(s: SuspectId, from: RoomId, to: RoomId) {
+    const f = this.figures.get(s)!.root;
+    const hole = (at: THREE.Vector3) => {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(0.34, 28), new THREE.MeshBasicMaterial({ color: 0x050505 }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.copy(at).add(new THREE.Vector3(0, 0.07, 0));
+      m.scale.setScalar(0.01);
+      this.scene.add(m);
+      return m;
+    };
+    const h1 = hole(f.position);
+    await this.tween(300, (k) => h1.scale.setScalar(k));
+    const start = f.position.clone();
+    await this.tween(600, (k) => (f.position.y = start.y - k * 1.3));
+    f.visible = false;
+    await this.tween(250, (k) => h1.scale.setScalar(1 - k));
+    this.scene.remove(h1);
+    const dest = (() => {
+      const g = roomSlot(to, s);
+      return world(g.x, g.y);
+    })();
+    if (!this.userCamera) this.roomShot(to, 2.5);
+    await this.wait(700);
+    const h2 = hole(dest);
+    await this.tween(300, (k) => h2.scale.setScalar(k));
+    f.position.copy(dest).add(new THREE.Vector3(0, -1.3, 0));
+    f.rotation.y = 0;
+    f.visible = true;
+    await this.tween(600, (k) => (f.position.y = dest.y - (1 - k) * 1.3));
+    await this.tween(250, (k) => h2.scale.setScalar(1 - k));
+    this.scene.remove(h2);
+    this.positions.set(s, { type: 'room', room: to });
+    void from;
+  }
+
+  // ------------------------------------------------------------------ Enveloppe et cartes
+
+  private buildEnvelope() {
+    const c = CENTER_RECT;
+    const group = new THREE.Group();
+    group.position.copy(world(c.x + c.w / 2, c.y + c.h / 2 - 1.6, 0.31));
+    const paper = this.mat(0xe9dcc0, 0.9);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.95), paper);
+    body.castShadow = body.receiveShadow = true;
+    group.add(body);
+    const flap = new THREE.Group();
+    flap.position.set(0, 0.03, -0.475);
+    const flapMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.02, 0.55), this.mat(0xddcfb0, 0.9));
+    flapMesh.position.z = 0.275;
+    const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.03, 18), this.mat(0x8c1d1d, 0.4));
+    seal.position.set(0, 0.02, 0.5);
+    flap.add(flapMesh, seal);
+    group.add(flap);
+    const q = this.label('?', 96, '#c9a24a');
+    q.position.set(0, 0.9, 0);
+    q.scale.set(0.8, 0.8, 1);
+    group.add(q);
+    const light = new THREE.PointLight(0xffd36b, 0, 5, 1.5);
+    light.position.set(0, 1.2, 0.3);
+    group.add(light);
+    this.scene.add(group);
+    this.envelope = { group, flap, light, mark: q };
+  }
+
+  private cardTexture(kind: 'suspect' | 'weapon' | 'room', name: string, color?: string) {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 360;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#f5eedc';
+    g.fillRect(0, 0, 256, 360);
+    const band = kind === 'suspect' ? '#a8322b' : kind === 'weapon' ? '#2e6cb0' : '#2f8a4a';
+    g.fillStyle = band;
+    g.fillRect(0, 0, 256, 64);
+    g.fillStyle = '#fff';
+    g.font = 'bold 26px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.fillText(kind === 'suspect' ? 'SUSPECT' : kind === 'weapon' ? 'ARME' : 'PIÈCE', 128, 42);
+    if (color) {
+      g.fillStyle = color;
+      g.beginPath();
+      g.arc(128, 160, 52, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = '#0006';
+      g.lineWidth = 4;
+      g.stroke();
+    }
+    g.fillStyle = '#2a2018';
+    let size = 40;
+    g.font = `bold ${size}px Georgia, serif`;
+    while (g.measureText(name).width > 220 && size > 18) g.font = `bold ${(size -= 2)}px Georgia, serif`;
+    g.fillText(name, 128, color ? 280 : 200);
+    g.strokeStyle = band;
+    g.lineWidth = 8;
+    g.strokeRect(4, 4, 248, 352);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  private cardBack() {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 360;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#3b1f2b';
+    g.fillRect(0, 0, 256, 360);
+    g.strokeStyle = '#c9a24a';
+    g.lineWidth = 8;
+    g.strokeRect(14, 14, 228, 332);
+    g.fillStyle = '#c9a24a';
+    g.font = 'bold 120px Georgia, serif';
+    g.textAlign = 'center';
+    g.fillText('?', 128, 225);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  /**
+   * Mise en scène d'une accusation ou de la révélation finale.
+   * - cards : les trois cartes (accusation, ou solution)
+   * - result : 'win' (accusation juste), 'wrong' (fausse : l'enveloppe reste fermée), 'reveal' (on montre la solution)
+   */
+  async envelopeScene(cards: { kind: 'suspect' | 'weapon' | 'room'; name: string; color?: string }[], result: 'win' | 'wrong' | 'reveal') {
+    this.clearCards();
+    const env = this.envelope;
+    env.mark.visible = false;
+    if (!this.userCamera) this.envelopeShot();
+    await this.wait(900);
+    if (result !== 'wrong') {
+      await this.tween(600, (k) => (env.flap.rotation.x = -k * 2.2));
+    }
+    const back = new THREE.MeshBasicMaterial({ map: this.cardBack() });
+    const meshes = cards.map((c, i) => {
+      const front = new THREE.MeshBasicMaterial({ map: this.cardTexture(c.kind, c.name, c.color) });
+      const card = new THREE.Group();
+      const f = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.87), front);
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.87), back);
+      b.rotation.y = Math.PI;
+      card.add(f, b);
+      card.rotation.y = Math.PI; // dos visible au début
+      const base = env.group.position.clone();
+      card.position.copy(base).add(new THREE.Vector3(0, 0.05, 0));
+      this.cards.add(card);
+      return { card, target: base.clone().add(new THREE.Vector3((i - 1) * 0.78, 0.95, 0.35)) };
+    });
+    // Les cartes sortent de l'enveloppe…
+    await this.tween(700, (k) => {
+      for (const m of meshes) m.card.position.lerpVectors(env.group.position.clone().add(new THREE.Vector3(0, 0.05, 0)), m.target, 1 - (1 - k) ** 3);
+    });
+    // … puis se retournent une à une
+    for (const m of meshes) {
+      await this.tween(380, (k) => (m.card.rotation.y = Math.PI * (1 - k)));
+      await this.wait(250);
+    }
+    if (result === 'win' || result === 'reveal') {
+      env.light.color.set(0xffd36b);
+      await this.tween(500, (k) => (env.light.intensity = k * 14));
+      for (const m of meshes) this.sparkle(m.card.position.clone(), 0xffe08a);
+    } else {
+      env.light.color.set(0xff3030);
+      await this.tween(300, (k) => (env.light.intensity = k * 14));
+      await this.wait(900);
+      // Accusation fausse : les cartes tombent et disparaissent
+      await this.tween(700, (k) => {
+        for (const m of meshes) {
+          m.card.position.y = m.target.y - k * 1.2;
+          m.card.rotation.z = k * 0.8;
+        }
+      });
+      this.clearCards();
+      await this.tween(400, (k) => (env.light.intensity = 14 * (1 - k)));
+      env.mark.visible = true;
+    }
+  }
+
+  clearCards() {
+    this.cards.clear();
+    this.envelope.light.intensity = 0;
+    this.envelope.mark.visible = true;
+    this.envelope.flap.rotation.x = 0;
+  }
+
+  // ------------------------------------------------------------------ Cases accessibles
+
   private hlCell = new THREE.MeshStandardMaterial({ color: 0x35d06a, emissive: 0x1aa34a, emissiveIntensity: 0.8, roughness: 0.4, transparent: true, opacity: 0.92 });
   private hlHover = new THREE.MeshStandardMaterial({ color: 0xffd34d, emissive: 0xffa800, emissiveIntensity: 0.9, roughness: 0.4 });
   private hlRoom = new THREE.MeshBasicMaterial({ color: 0x35d06a, transparent: true, opacity: 0.25, depthWrite: false });
   private hlEdge = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
   private arrows: THREE.Object3D[] = [];
   private hlTiles = new Map<string, THREE.Mesh>();
+  private current: SuspectId | null = null;
 
   setCurrent(s: SuspectId | null) {
     this.ring.visible = !!s;
     this.current = s;
   }
-  private current: SuspectId | null = null;
 
-  /**
-   * Affiche les cases accessibles : dalles vertes lumineuses avec un contour blanc,
-   * les pièces accessibles en vert avec une grosse flèche qui rebondit.
-   * Au survol (ou au premier toucher sur téléphone), le chemin s'affiche et la case devient jaune.
-   */
+  /** Cases accessibles : dalles vertes lumineuses + flèche au-dessus des pièces ; aperçu du chemin au survol. */
   setReach(dests: Destination[], onPick: (d: Destination) => void) {
     this.onPick = onPick;
     this.reach.clear();
     this.highlight.clear();
     this.hlTiles.clear();
     this.arrows = [];
+    this.hoverKey = '__';
     this.showPath(null);
     const tileGeo = new THREE.BoxGeometry(0.84, 0.06, 0.84);
     const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(0.88, 0.065, 0.88));
@@ -663,7 +963,6 @@ export class Board3D {
         const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(r.w - 0.3, r.h - 0.3)), this.hlEdge);
         outline.rotation.x = -Math.PI / 2;
         outline.position.copy(floor.position);
-        // Flèche qui rebondit au-dessus de la pièce
         const arrow = new THREE.Group();
         const head = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.5, 20), this.hlCell);
         head.rotation.x = Math.PI;
@@ -677,7 +976,6 @@ export class Board3D {
     }
   }
 
-  /** Affiche le chemin jusqu'à une destination (petites billes blanches). */
   private showPath(key: string | null) {
     if (key === this.hoverKey) return;
     this.hoverKey = key;
@@ -685,7 +983,7 @@ export class Board3D {
     for (const [k, t] of this.hlTiles) t.material = k === key ? this.hlHover : this.hlCell;
     if (!key) return;
     const d = this.reach.get(key);
-    if (!d || !this.current) return;
+    if (!d) return;
     const dot = new THREE.SphereGeometry(0.08, 12, 10);
     const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     for (const p of d.path.slice(1, -1)) {
@@ -696,132 +994,140 @@ export class Board3D {
     }
   }
 
-  // ------------------------------------------------------------------ Caméra
+  // ------------------------------------------------------------------ Caméra (orientation fixe)
 
-  setMode(mode: CamMode) {
-    this.mode = mode;
-    this.controls.enabled = mode === 'free';
-    if (mode === 'free') this.controls.target.copy(this.camLook);
-    this.host.dispatchEvent(new CustomEvent('cammode', { detail: mode }));
+  /** Direction de la caméra : depuis le sud, inclinée d'environ 55°. */
+  private static DIR = new THREE.Vector3(0, Math.sin((55 * Math.PI) / 180), Math.cos((55 * Math.PI) / 180));
+
+  private lookFrom(center: THREE.Vector3, distance: number, speed: number, dir = Board3D.DIR) {
+    this.camGoal.look.copy(center);
+    this.camGoal.pos.copy(center).addScaledVector(dir, distance);
+    this.camGoal.speed = speed;
   }
 
-  /** Intro : la caméra fait le tour du plateau en descendant, pour montrer le relief. */
-  intro(duration = 6): Promise<void> {
-    return new Promise((resolve) => {
-      let t = 0;
-      const tick = (dt: number) => {
-        t += dt / duration;
-        const k = Math.min(1, t);
-        const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-        const angle = Math.PI * 1.25 + ease * Math.PI * 2;
-        const radius = 22 - ease * 6;
-        const height = 16 - ease * 9;
-        this.camGoal.pos.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
-        this.camGoal.look.set(0, 0.5, 0);
-        this.camGoal.speed = 8;
-        if (k >= 1) {
-          this.tickers.delete(tick);
-          resolve();
-        }
-      };
-      this.tickers.add(tick);
-    });
+  /** Le joueur rend la main : la caméra redevient automatique. */
+  resumeAuto() {
+    if (!this.userCamera) return;
+    this.userCamera = false;
+    this.onUserCamera?.(false);
   }
 
-  /** Vue d'ensemble légèrement inclinée. */
-  overview(speed = 2) {
+  /** Vue « table » : tout le plateau, comme assis devant. */
+  tableView(speed = 1.8) {
+    if (this.userCamera) return;
     this.follow = null;
-    this.followEnabled = false;
-    const narrow = this.camera.aspect < 0.8;
-    this.camGoal.pos.set(0, narrow ? 36 : 27, narrow ? 24 : 21);
-    this.camGoal.look.set(0, 0, 1);
-    this.camGoal.speed = speed || 100;
+    this.orbit = null;
+    // Distance calculée pour que tout le plateau tienne à l'écran, quelle que soit sa forme
+    const vfov = (this.camera.fov * Math.PI) / 180;
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
+    const d = Math.max((BOARD_WIDTH / 2 + 0.8) / Math.tan(hfov / 2), ((BOARD_HEIGHT * 0.86) / 2 + 1.2) / Math.tan(vfov / 2));
+    this.lookFrom(new THREE.Vector3(0, 0, 0.6), d, speed || 100);
   }
 
-  /** Cadre un personnage de trois quarts. */
-  focusOn(s: SuspectId, speed = 2.2) {
-    this.followEnabled = true;
-    const p = this.figures.get(s)!.root.position;
-    this.camGoal.look.copy(p).add(new THREE.Vector3(0, 0.4, 0));
-    this.camGoal.pos.copy(p).add(new THREE.Vector3(-3.2, 6.5, 6.2));
-    this.camGoal.speed = speed;
+  /** Plan moyen sur un pion (début de tour). */
+  focusPawn(s: SuspectId, speed = 2) {
+    if (this.userCamera) return;
+    this.follow = null;
+    this.orbit = null;
+    this.lookFrom(this.pawnPoint(s).add(new THREE.Vector3(0, 0.4, 0)), this.camera.aspect < 0.8 ? 11 : 9, speed);
   }
 
-  /**
-   * Caméra derrière le personnage, tournée vers ses destinations possibles
-   * (assez haut pour bien voir les cases vertes).
-   */
-  behind(s: SuspectId, toward: THREE.Vector3) {
-    this.followEnabled = true;
-    const f = this.figures.get(s)!.root;
-    const yaw = Math.atan2(toward.x - f.position.x, toward.z - f.position.z);
-    // le personnage se tourne vers là où il peut aller
-    let t = 0;
-    const start = f.rotation.y;
-    let d = yaw - start;
-    d = Math.atan2(Math.sin(d), Math.cos(d));
-    const turn = (dt: number) => {
-      t = Math.min(1, t + dt * 2.5);
-      f.rotation.y = start + d * t;
-      if (t >= 1) this.tickers.delete(turn);
-    };
-    this.tickers.add(turn);
-    const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    this.camGoal.pos.copy(f.position).addScaledVector(dir, -4.2).add(new THREE.Vector3(0, 4.6, 0));
-    this.camGoal.look.copy(f.position).addScaledVector(dir, 2.6);
-    this.camGoal.speed = 2.4;
+  /** Cadre toute une zone (ex. les cases accessibles), vue de haut, même orientation. */
+  frameArea(points: THREE.Vector3[], speed = 2) {
+    if (this.userCamera || !points.length) return;
+    this.follow = null;
+    this.orbit = null;
+    const box = new THREE.Box3().setFromPoints(points);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const vfov = (this.camera.fov * Math.PI) / 180;
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
+    const dW = (size.x / 2 + 1.2) / Math.tan(hfov / 2);
+    const dH = ((size.z * 0.82) / 2 + 1.4) / Math.tan(vfov / 2);
+    this.lookFrom(center, THREE.MathUtils.clamp(Math.max(dW, dH), 7, 40), speed);
   }
 
-  /** Point au sol d'une destination (pour orienter la caméra). */
-  destPoint(d: Destination, s: SuspectId) {
-    const g = gridOf(d.to, s);
-    return world(g.x, g.y);
-  }
-
-  /** Plan « cinéma » sur une pièce : depuis l'entrée, à hauteur d'homme. */
-  roomShot(room: RoomId, speed = 1.6) {
-    if (!this.followEnabled) return;
+  /** Plan sur une pièce, vue de l'avant, comme une scène de théâtre. */
+  roomShot(room: RoomId, speed = 2) {
+    if (this.userCamera) return;
+    this.follow = null;
+    this.orbit = null;
     const r = ROOM_RECTS[room];
-    const c = world(r.x + r.w / 2, r.y + r.h / 2);
-    this.camGoal.look.copy(c).add(new THREE.Vector3(0, 0.5, -0.3));
-    // On se place devant la pièce (côté sud-est), assez bas
-    this.camGoal.pos.copy(c).add(new THREE.Vector3(r.w * 0.35, 2.6, r.h * 0.75 + 1.6));
-    this.camGoal.speed = speed;
+    const pts = [world(r.x, r.y), world(r.x + r.w, r.y + r.h)];
+    const dir = new THREE.Vector3(0, Math.sin(0.82), Math.cos(0.82)); // ~47°, plus bas que la vue table
+    const box = new THREE.Box3().setFromPoints(pts);
+    const center = box.getCenter(new THREE.Vector3()).add(new THREE.Vector3(0, 0.3, 0));
+    const vfov = (this.camera.fov * Math.PI) / 180;
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
+    const d = Math.max((r.w / 2 + 0.6) / Math.tan(hfov / 2), (r.h * 0.75 / 2 + 1) / Math.tan(vfov / 2));
+    this.lookFrom(center, THREE.MathUtils.clamp(d, 5.5, 20), speed, dir);
+  }
+
+  /** Gros plan sur l'enveloppe. */
+  envelopeShot() {
+    if (this.userCamera) return;
+    this.follow = null;
+    this.orbit = null;
+    const p = this.envelope.group.position.clone().add(new THREE.Vector3(0, 0.6, 0.2));
+    const dir = new THREE.Vector3(0, Math.sin(0.5), Math.cos(0.5));
+    this.lookFrom(p, this.camera.aspect < 0.8 ? 6.6 : 3.8, 2.2, dir);
+  }
+
+  /** Fin de partie : tour lent autour d'une pièce. */
+  orbitRoom(room: RoomId) {
+    if (this.userCamera) return;
+    this.follow = null;
+    const r = ROOM_RECTS[room];
+    this.orbit = { center: world(r.x + r.w / 2, r.y + r.h / 2, 0.4), angle: 0, radius: Math.max(r.w, r.h) * 0.9 + 2, height: 4.5 };
   }
 
   private updateCamera(dt: number) {
-    if (this.mode === 'free') {
+    if (this.userCamera) {
       this.controls.update();
       this.camLook.copy(this.controls.target);
       return;
     }
-    if (this.follow) {
-      // Caméra derrière le personnage qui marche, un peu au-dessus
-      const f = this.figures.get(this.follow)!.root;
-      const yaw = f.rotation.y;
-      const back = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-      this.camGoal.pos.copy(f.position).addScaledVector(back, 3.4).add(new THREE.Vector3(0, 2.6, 0));
-      this.camGoal.look.copy(f.position).addScaledVector(back, -1.6).add(new THREE.Vector3(0, 0.5, 0));
-      this.camGoal.speed = 3.2;
+    if (this.orbit) {
+      this.orbit.angle += dt * 0.25;
+      const o = this.orbit;
+      this.camGoal.pos.set(o.center.x + Math.sin(o.angle) * o.radius, o.height, o.center.z + Math.cos(o.angle) * o.radius);
+      this.camGoal.look.copy(o.center);
+      this.camGoal.speed = 1.5;
+    } else if (this.follow) {
+      const f = this.figures.get(this.follow.s)!.root;
+      if (this.follow.back) {
+        // Option : caméra de dos
+        const yaw = f.rotation.y;
+        const back = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+        this.camGoal.pos.copy(f.position).addScaledVector(back, 3.4).add(new THREE.Vector3(0, 2.6, 0));
+        this.camGoal.look.copy(f.position).addScaledVector(back, -1.6).add(new THREE.Vector3(0, 0.5, 0));
+      } else {
+        // Suivi doux, sans rotation
+        const d = this.follow.far ? 14 : this.camera.aspect < 0.8 ? 11 : 9;
+        this.camGoal.look.copy(f.position).add(new THREE.Vector3(0, 0.4, 0));
+        this.camGoal.pos.copy(this.camGoal.look).addScaledVector(Board3D.DIR, d);
+      }
+      this.camGoal.speed = 3;
     }
     const k = 1 - Math.exp(-dt * this.camGoal.speed);
     this.camera.position.lerp(this.camGoal.pos, k);
     this.camLook.lerp(this.camGoal.look, k);
     this.camera.lookAt(this.camLook);
+    this.controls.target.copy(this.camLook);
   }
 
   private updateDoors(dt: number) {
-    for (const d of this.doors.values()) {
-      d.pivot.rotation.y += (d.target - d.pivot.rotation.y) * Math.min(1, dt * 7);
-    }
+    for (const d of this.doors.values()) d.pivot.rotation.y += (d.target - d.pivot.rotation.y) * Math.min(1, dt * 7);
   }
 
   // ------------------------------------------------------------------ Boucle, toucher, taille
 
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const real = Math.min(this.clock.getDelta(), 0.05);
+    const dt = real * this.timeScale * this.boost;
     for (const t of [...this.tickers]) t(dt);
+    if (this.boost > 1 && this.tickers.size === 0) this.boost = 1;
     for (const [s, f] of this.figures) f.animate(dt, this.walking.has(s));
     if (this.current) {
       const p = this.figures.get(this.current)!.root.position;
@@ -835,12 +1141,15 @@ export class Board3D {
     this.hlRoom.opacity = 0.22 + Math.sin(now / 260) * 0.08;
     for (const a of this.arrows) {
       a.position.y = 2.2 + Math.abs(Math.sin(now / 280)) * 0.45;
-      a.rotation.y += dt * 1.5;
+      a.rotation.y += real * 1.5;
     }
-    this.updateCamera(dt);
+    this.updateCamera(real);
     this.updateDoors(dt);
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Événement « on a touché le plateau » (sert à accélérer une animation en cours). */
+  onTap: (() => void) | null = null;
 
   private setupPicking() {
     const ray = new THREE.Raycaster();
@@ -862,7 +1171,7 @@ export class Board3D {
     };
     el.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
     el.addEventListener('pointermove', (e) => {
-      if (e.pointerType === 'mouse' && this.reach.size) {
+      if (e.pointerType === 'mouse' && this.reach.size && !e.buttons) {
         const k = keyAt(e);
         this.showPath(k);
         el.style.cursor = k ? 'pointer' : '';
@@ -871,9 +1180,10 @@ export class Board3D {
     el.addEventListener('pointerup', (e) => {
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) return;
       down = null;
+      this.onTap?.();
       const k = keyAt(e);
       if (!k) return;
-      // Sur écran tactile : 1er toucher = aperçu du chemin, 2e toucher = on y va
+      // Écran tactile : 1er toucher = aperçu du chemin, 2e toucher = on y va
       if (e.pointerType !== 'mouse' && this.hoverKey !== k) {
         this.showPath(k);
         this.host.dispatchEvent(new CustomEvent('preview'));
@@ -889,7 +1199,6 @@ export class Board3D {
     const h = Math.max(this.host.clientHeight, 100);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
-    // Sur un écran étroit (téléphone en portrait), on élargit le champ de vision
     this.camera.fov = w / h < 0.8 ? 58 : 42;
     this.camera.updateProjectionMatrix();
   }

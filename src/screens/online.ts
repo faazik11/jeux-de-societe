@@ -54,7 +54,7 @@ export function renderHome(app: HTMLElement, go: (hash: string) => void, error =
       </div>
     </div>
     <div class="error" id="err">${esc(error)}</div>
-    <p class="muted"><a href="#/test" style="color:var(--muted)">Mode test (tous sur le même écran)</a> · <a href="#/3d" style="color:var(--muted)">Prototype 3D</a></p>`;
+    <p class="muted"><a href="#/test" style="color:var(--muted)">Mode test (tous sur le même écran)</a></p>`;
 
   const nameInput = app.querySelector<HTMLInputElement>('#name')!;
   const err = app.querySelector<HTMLElement>('#err')!;

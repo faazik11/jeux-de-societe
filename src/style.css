@@ -126,3 +126,20 @@ button.danger { border-color: var(--danger); color: #ffb4b1; }
   backdrop-filter: blur(6px);
 }
 .p3d .dice-overlay { position: absolute; }
+
+/* Réglages et indice caméra sur le plateau */
+.cam-hint {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 3;
+  background: #1b1d24d9; border: 1px solid var(--line); border-radius: 20px; padding: 5px 12px;
+  font-size: 0.8rem; color: var(--muted); opacity: 0; pointer-events: none; transition: opacity 0.3s;
+}
+.cam-hint.show { opacity: 1; }
+.settings-panel {
+  position: absolute; right: 60px; top: 10px; z-index: 5; width: min(320px, calc(100% - 80px));
+  background: #1f222bf2; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+  backdrop-filter: blur(6px);
+}
+.settings-panel h3 { margin: 0 0 8px; font-size: 1rem; color: var(--accent); }
+.set-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: 8px 0; }
+.set-row > span { width: 100%; font-size: 0.82rem; color: var(--muted); }
+.opt { font-size: 0.9rem; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }

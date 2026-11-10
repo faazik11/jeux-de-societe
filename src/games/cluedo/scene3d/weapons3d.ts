@@ -2,7 +2,7 @@
 // un matériau métallique qui reflète la lumière, différent du reste du décor.
 
 import * as THREE from 'three';
-import type { WeaponId } from '../games/cluedo/engine';
+import type { WeaponId } from '../engine';
 
 export function makeWeapon(id: WeaponId, envMap: THREE.Texture | null): THREE.Group {
   const metal = new THREE.MeshStandardMaterial({

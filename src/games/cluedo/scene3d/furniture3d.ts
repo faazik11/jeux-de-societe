@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { RoomId } from '../games/cluedo/engine';
+import type { RoomId } from '../engine';
 
 export interface Placement {
   m: string;

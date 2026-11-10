@@ -1,7 +1,9 @@
 // Écran de partie (version simple vue de dessus, en attendant le plateau isométrique).
 // Utilisé à la fois par le mode test local et par le jeu en ligne.
 
-import { IsoBoard } from '../board3d/IsoBoard';
+import { IsoBoard, type BoardUpdate } from '../board3d/IsoBoard';
+import { Board3DView } from '../board3d/Board3DView';
+import { loadSettings, saveSettings, webglAvailable, type DisplaySettings } from './settings';
 import {
   ROOMS,
   SUSPECTS,
@@ -84,26 +86,76 @@ function renderNotebook(me: string, v: PlayerView): string {
     <p class="muted">Touche une case pour cocher : ✗ innocent, ? doute, ✓ coupable.</p>`;
 }
 
-const boards = new WeakMap<HTMLElement, IsoBoard>();
+interface BoardLike {
+  update(u: BoardUpdate): void;
+  recenter(): void;
+  destroy(): void;
+}
 
-/** Crée la structure de l'écran (une seule fois) et le plateau Phaser. */
-function ensureLayout(el: HTMLElement): IsoBoard {
+const boards = new WeakMap<HTMLElement, BoardLike>();
+const lastOptions = new WeakMap<HTMLElement, GameViewOptions>();
+
+/** Crée la structure de l'écran (une seule fois) et le plateau (3D ou 2.5D selon les réglages). */
+function ensureLayout(el: HTMLElement): BoardLike {
   const existing = boards.get(el);
   if (existing && el.querySelector('#board-host')) return existing;
   existing?.destroy();
+  const settings = loadSettings();
+  const use3d = settings.board === '3d' && webglAvailable();
   el.innerHTML = `
     <div id="gv-top"></div>
     <div class="layout">
       <div class="board-wrap">
         <div id="board-host"></div>
-        <button class="board-btn" id="recenter" title="Recentrer le plateau">⤢</button>
+        <button class="board-btn" id="recenter" title="Recentrer la caméra">⤢</button>
+        <button class="board-btn" id="settings-btn" title="Réglages" style="top:58px">⚙</button>
+        <div class="cam-hint" id="cam-hint">Caméra libre · touche ⤢ pour recentrer</div>
+        <div class="settings-panel" id="settings-panel" hidden></div>
       </div>
       <div id="gv-side"></div>
     </div>`;
-  const board = IsoBoard.create(el.querySelector<HTMLElement>('#board-host')!);
+  const host = el.querySelector<HTMLElement>('#board-host')!;
+  const hint = el.querySelector<HTMLElement>('#cam-hint')!;
+  const board: BoardLike = use3d
+    ? Board3DView.create(host, settings, (user) => hint.classList.toggle('show', user))
+    : IsoBoard.create(host);
   boards.set(el, board);
   el.querySelector('#recenter')!.addEventListener('click', () => board.recenter());
+  setupSettings(el, settings, use3d);
   return board;
+}
+
+/** Panneau de réglages (⚙) affiché par-dessus le plateau. */
+function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
+  const panel = el.querySelector<HTMLElement>('#settings-panel')!;
+  const opt = (name: string, value: string, label: string, checked: boolean) =>
+    `<label class="opt"><input type="radio" name="${name}" value="${value}" ${checked ? 'checked' : ''}> ${label}</label>`;
+  panel.innerHTML = `
+    <h3>Réglages</h3>
+    <div class="set-row"><span>Plateau</span>${opt('board', '3d', '3D', s.board === '3d')}${opt('board', '2.5d', '2.5D (plus léger)', s.board === '2.5d')}</div>
+    ${use3d ? `
+    <div class="set-row"><span>Animations</span>${opt('speed', 'normal', 'Normales', s.speed === 'normal')}${opt('speed', 'fast', 'Rapides', s.speed === 'fast')}</div>
+    <div class="set-row"><span>Mises en scène</span>${opt('cine', '1', 'Oui', s.cinematics)}${opt('cine', '0', 'Passer', !s.cinematics)}</div>
+    <div class="set-row"><span>Caméra pendant la marche</span>${opt('back', '0', 'Vue de haut', !s.backCam)}${opt('back', '1', 'De dos', s.backCam)}</div>
+    <p class="muted">Astuce : touche le plateau pendant une animation pour l'accélérer.</p>` : ''}
+    <div class="row"><button class="primary" id="settings-close">OK</button></div>`;
+  el.querySelector('#settings-btn')!.addEventListener('click', () => (panel.hidden = !panel.hidden));
+  panel.querySelector('#settings-close')!.addEventListener('click', () => (panel.hidden = true));
+  panel.addEventListener('change', () => {
+    const val = (n: string) => panel.querySelector<HTMLInputElement>(`input[name="${n}"]:checked`)?.value;
+    const next: DisplaySettings = {
+      board: val('board') === '2.5d' ? '2.5d' : '3d',
+      speed: val('speed') === 'fast' ? 'fast' : 'normal',
+      cinematics: (val('cine') ?? (s.cinematics ? '1' : '0')) === '1',
+      backCam: (val('back') ?? (s.backCam ? '1' : '0')) === '1',
+    };
+    saveSettings(next);
+    // On reconstruit le plateau avec les nouveaux réglages
+    const o = lastOptions.get(el);
+    destroyGameView(el);
+    el.innerHTML = '';
+    if (o) renderGame(el, o);
+  });
 }
 
 /** À appeler en quittant l'écran de partie : libère le plateau. */
@@ -113,6 +165,7 @@ export function destroyGameView(el: HTMLElement) {
 }
 
 export function renderGame(el: HTMLElement, o: GameViewOptions) {
+  lastOptions.set(el, o);
   const g = o.state;
   const me = o.me;
   const paused = (o.pausedBy?.length ?? 0) > 0 && g.phase !== 'finished';

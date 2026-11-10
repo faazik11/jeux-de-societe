@@ -67,16 +67,26 @@ export interface DiceTable {
   halfZ: number;
   /** Hauteur de la surface */
   y: number;
+  /** Obstacles fixes (murs) sur lesquels les dés rebondissent */
+  obstacles?: { center: THREE.Vector3; size: THREE.Vector3 }[];
 }
 
 export class Dice3D {
   private meshes: THREE.Mesh[] = [];
 
-  constructor(private scene: THREE.Scene, private table: DiceTable) {}
+  private table!: DiceTable;
 
-  /** Lance les dés et se termine quand ils sont immobiles. `onFrame` reçoit la position moyenne (pour la caméra). */
-  async roll(values: number[], onFrame?: (center: THREE.Vector3) => void): Promise<void> {
+  /** addTicker/removeTicker : horloge de la scène (pour respecter l'accélération des animations). */
+  constructor(
+    private scene: THREE.Scene,
+    private addTicker: (fn: (dt: number) => void) => void,
+    private removeTicker: (fn: (dt: number) => void) => void,
+  ) {}
+
+  /** Lance les dés sur `table` et se termine quand ils sont immobiles. `onFrame` reçoit leur position moyenne. */
+  async roll(values: number[], table: DiceTable, onFrame?: (center: THREE.Vector3) => void): Promise<void> {
     this.clear();
+    this.table = table;
     const { frames, tops } = this.simulate(values.length);
 
     // Une boîte par dé, avec les chiffres placés pour tomber sur la bonne valeur
@@ -91,9 +101,10 @@ export class Dice3D {
 
     // Lecture de la simulation enregistrée, à vitesse réelle
     await new Promise<void>((resolve) => {
-      const start = performance.now();
-      const step = () => {
-        const f = Math.min(frames.length - 1, Math.floor(((performance.now() - start) / 1000) * 60));
+      let time = 0;
+      const step = (dt: number) => {
+        time += dt;
+        const f = Math.min(frames.length - 1, Math.floor(time * 60));
         const fr = frames[f];
         this.meshes.forEach((m, i) => {
           m.position.copy(fr.p[i]);
@@ -101,10 +112,13 @@ export class Dice3D {
         });
         const c = fr.p.reduce((a, b) => a.add(b), new THREE.Vector3()).multiplyScalar(1 / fr.p.length);
         onFrame?.(c);
-        if (f >= frames.length - 1) resolve();
-        else requestAnimationFrame(step);
+        if (f >= frames.length - 1) {
+          this.removeTicker(step);
+          resolve();
+        }
       };
-      step();
+      step(0);
+      this.addTicker(step);
     });
   }
 
@@ -155,6 +169,16 @@ export class Dice3D {
     plane(new CANNON.Vec3(c.x, 0, c.z - t.halfZ), new CANNON.Vec3(0, 1, 0), 0);
     plane(new CANNON.Vec3(c.x, 0, c.z + t.halfZ), new CANNON.Vec3(0, 1, 0), Math.PI);
 
+    for (const o of t.obstacles ?? []) {
+      const b = new CANNON.Body({
+        mass: 0,
+        material: mat,
+        shape: new CANNON.Box(new CANNON.Vec3(o.size.x / 2, o.size.y / 2, o.size.z / 2)),
+      });
+      b.position.set(o.center.x, o.center.y, o.center.z);
+      world.addBody(b);
+    }
+
     const bodies: CANNON.Body[] = [];
     for (let i = 0; i < count; i++) {
       const b = new CANNON.Body({
@@ -167,8 +191,8 @@ export class Dice3D {
         angularDamping: 0.1,
       });
       // On lance depuis le bord avant de la table, vers le fond
-      b.position.set(c.x - 0.6 + i * 0.7, t.y + 1.6 + i * 0.2, c.z + t.halfZ - 0.5);
-      b.velocity.set((Math.random() - 0.5) * 3, 2 + Math.random(), -(6 + Math.random() * 3));
+      b.position.set(c.x - 0.4 + i * 0.6, t.y + 1.3 + i * 0.2, c.z + t.halfZ - 0.4);
+      b.velocity.set((Math.random() - 0.5) * 2, 1.5 + Math.random(), -(3.5 + Math.random() * 2));
       b.angularVelocity.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30);
       b.quaternion.setFromEuler(Math.random() * 6, Math.random() * 6, Math.random() * 6);
       world.addBody(b);
