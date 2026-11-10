@@ -384,3 +384,21 @@ button.pill.danger { background: linear-gradient(180deg, var(--velvet-light), va
 .img-kind { margin: 10px 0 0; font-family: var(--font-title); color: var(--accent-light); }
 /* Pièces : l'image paysage remplit le cadre, recadrée sur le sujet */
 .gcard.has-photo .gc-photo { -webkit-user-drag: none; }
+/* Entrée dans une pièce : l'illustration en grand */
+.announce.room-shot { padding: 0; width: min(440px, calc(100% - 32px)); overflow: hidden; }
+.room-pic { width: 100%; aspect-ratio: 16 / 9; background: center / cover no-repeat; border-bottom: 2px solid var(--accent); animation: room-zoom 2.4s ease-out both; }
+@keyframes room-zoom { from { transform: scale(1.12); } to { transform: scale(1); } }
+.room-cap { padding: 10px 16px 14px; }
+.announce.room-shot .title { font-size: 1.6rem; }
+/* Salon d'attente : choix du personnage avec les portraits */
+.sus-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sus-tile { position: relative; display: flex; flex-direction: column; align-items: center; padding: 8px 4px 6px; border: 2px solid var(--accent-dark); border-radius: 12px; background: var(--panel-2); line-height: 1.1; }
+.sus-tile .portrait { width: 70px; height: 84px; margin-bottom: 4px; }
+.sus-tile .portrait.photo { border-radius: 50% / 45%; border-width: 3px; }
+.sus-title { font: italic .72rem var(--font-title); opacity: .8; }
+.sus-name { font: 700 .95rem var(--font-title); }
+.sus-tile.mine { border-color: var(--c); box-shadow: 0 0 0 2px var(--c), 0 0 18px color-mix(in srgb, var(--c) 60%, transparent); }
+.sus-tile:disabled { opacity: .4; filter: grayscale(.7); }
+.sus-taken { position: absolute; top: 6px; right: 6px; font-size: .65rem; background: #000a; padding: 1px 5px; border-radius: 6px; }
+.who-portrait { display: inline-block; width: 30px; height: 36px; vertical-align: middle; }
+.who-portrait .portrait { width: 100%; height: 100%; }

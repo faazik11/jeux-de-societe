@@ -2,6 +2,7 @@
 
 import { SUSPECTS, type SuspectId } from '../games/cluedo/engine';
 import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
+import { portraitHTML } from '../games/cluedo/ui/cards';
 import { ensureSignedIn, multiTabTest } from '../online/firebase';
 import { renderInstall } from '../pwa';
 import {
@@ -213,7 +214,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
           const s = SUSPECTS.find((x) => x.id === p.suspect);
           const online = room.presence[id] === true;
           return `<div class="row" style="margin:4px 0">
-            <span class="who" style="background:${s?.color ?? '#555'}"></span>
+            ${s ? `<span class="who-portrait">${portraitHTML(s.id)}</span>` : `<span class="who" style="background:#555"></span>`}
             <b>${esc(p.name)}</b>${id === uid ? ' (toi)' : ''}
             <span class="muted">${s ? s.name : 'pas de personnage'}${id === room.hostUid ? ' · maître de jeu' : ''}${online ? '' : ' · hors ligne'}</span>
           </div>`;
@@ -221,11 +222,11 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
       </div>
       <div class="panel">
         <h2>Ton personnage</h2>
-        <div class="row">${SUSPECTS.map((s) => {
+        <div class="sus-pick">${SUSPECTS.map((s) => {
           const owner = taken.get(s.id);
           const disabled = owner && owner !== uid;
-          return `<button data-sus="${s.id}" ${disabled ? 'disabled' : ''}
-            style="border-color:${s.color};${mine === s.id ? `background:${s.color};color:#111;font-weight:700` : ''}">${s.name}</button>`;
+          return `<button class="sus-tile ${mine === s.id ? 'mine' : ''}" data-sus="${s.id}" ${disabled ? 'disabled' : ''} style="--c:${s.color}">
+            ${portraitHTML(s.id)}<span class="sus-title">${s.title}</span><span class="sus-name">${s.surname}</span>${disabled ? '<span class="sus-taken">pris</span>' : ''}</button>`;
         }).join('')}</div>
       </div>
       <div class="error">${esc(error)}</div>

@@ -8,8 +8,9 @@
 import { IsoBoard, type BoardUpdate } from '../board3d/IsoBoard';
 import { Board3DView } from '../board3d/Board3DView';
 import { loadSettings, saveSettings, webglAvailable, type DisplaySettings } from './settings';
-import { cardBackHTML, cardHTML, portraitHTML } from './cards';
+import { cardBackHTML, cardHTML, cardImage, portraitHTML } from './cards';
 import { ICONS } from './icons';
+import { audioPrefs, duckMusic, play as sfx, setAudioPrefs, type SoundName } from './sound';
 import { customImages, loadCustomImages, onCustomImagesChange, removeCustomImage, setCustomImage } from './customImages';
 import {
   ROOMS,
@@ -157,7 +158,7 @@ interface UiState {
   /** Dernier tour annoncé (pour « Tour de X »). */
   announcedTurn: number;
   /** File des annonces au milieu de l'écran. */
-  queue: { html: string; ms: number; cls?: string }[];
+  queue: { html: string; ms: number; cls?: string; sound?: SoundName }[];
   showing: boolean;
   lastError?: string;
   /** Tour pour lequel l'hypothèse doit s'ouvrir toute seule (dès que le pion est arrivé). */
@@ -263,10 +264,18 @@ function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
     <div class="set-row"><span>Mises en scène</span>${opt('cine', '1', 'Oui', s.cinematics)}${opt('cine', '0', 'Passer', !s.cinematics)}</div>
     <div class="set-row"><span>Caméra pendant la marche</span>${opt('back', '0', 'Vue de haut', !s.backCam)}${opt('back', '1', 'De dos', s.backCam)}</div>
     <p class="muted">Astuce : touche le plateau pendant une animation pour l'accélérer.</p>` : ''}
+    <div class="set-row"><span>Bruitages</span>${opt('sfx', '1', 'Oui', audioPrefs.sfx)}${opt('sfx', '0', 'Non', !audioPrefs.sfx)}</div>
+    <div class="set-row"><span>Musique</span>${opt('music', '1', 'Oui', audioPrefs.music)}${opt('music', '0', 'Non', !audioPrefs.music)}</div>
     <div class="row"><button class="primary" id="settings-close">OK</button></div>`;
   panel.querySelector('#settings-close')!.addEventListener('click', () => (panel.hidden = true));
-  panel.addEventListener('change', () => {
+  panel.addEventListener('change', (ev) => {
     const val = (n: string) => panel.querySelector<HTMLInputElement>(`input[name="${n}"]:checked`)?.value;
+    // Le son se règle sans recharger le plateau
+    const name = (ev.target as HTMLInputElement).name;
+    if (name === 'sfx' || name === 'music') {
+      setAudioPrefs({ sfx: val('sfx') === '1', music: val('music') === '1' });
+      return;
+    }
     const next: DisplaySettings = {
       board: val('board') === '2.5d' ? '2.5d' : '3d',
       speed: val('speed') === 'fast' ? 'fast' : 'normal',
@@ -295,11 +304,18 @@ export function destroyGameView(el: HTMLElement) {
 // ---------------------------------------------------------------------------
 // Annonces au milieu de l'écran
 
-function announce(el: HTMLElement, html: string, ms = 1600, cls = '') {
+function announce(el: HTMLElement, html: string, ms = 1600, cls = '', sound?: SoundName) {
   const ui = uiStates.get(el);
   if (!ui) return;
-  ui.queue.push({ html, ms, cls });
+  ui.queue.push({ html, ms, cls, sound });
   if (!ui.showing && boardReady.has(el)) nextAnnounce(el);
+}
+
+/** Annonce d'entrée dans une pièce, avec son illustration en grand. */
+function roomAnnounce(who: string, verb: string, room: CardId): string {
+  const img = cardImage(room);
+  return `${img ? `<div class="room-pic" style="background-image:url('${img}')"></div>` : ''}
+    <div class="room-cap"><div class="sub">${who} ${verb}</div><div class="title">${getCard(room).name}</div></div>`;
 }
 
 function nextAnnounce(el: HTMLElement) {
@@ -317,6 +333,7 @@ function nextAnnounce(el: HTMLElement) {
   box.innerHTML = item.html;
   layer.appendChild(box);
   requestAnimationFrame(() => box.classList.add('in'));
+  if (item.sound) sfx(item.sound);
   // Toucher l'annonce la passe
   let done = false;
   const finish = () => {
@@ -381,16 +398,15 @@ function roundOf(g: GameState): number {
 /** Transforme les nouveaux événements du journal en annonces. */
 function announceLog(el: HTMLElement, v: PlayerView, fresh: LogEntry[], me: string) {
   const n = (id: string) => nameOf(v, id, me);
-  const c = (id: CardId) => getCard(id).name;
   for (const e of fresh) {
     switch (e.type) {
       case 'moved': {
         const to = e.path.at(-1)!;
-        if (to.type === 'room') announce(el, `${n(e.player)}<div class="sub">entre dans</div><div class="title">${c(to.room)}</div>`, 1700);
+        if (to.type === 'room') announce(el, roomAnnounce(n(e.player), 'entre dans', to.room), 2100, 'room-shot', 'room');
         break;
       }
       case 'secretPassage':
-        announce(el, `🕳️ Passage secret<div class="sub">${n(e.player)} → ${c(e.to)}</div>`, 1800);
+        announce(el, roomAnnounce(n(e.player), '🕳️ passage secret vers', e.to), 2100, 'room-shot');
         break;
       case 'suggested':
         announce(
@@ -399,7 +415,9 @@ function announceLog(el: HTMLElement, v: PlayerView, fresh: LogEntry[], me: stri
           <div class="card-row center tight">${cardHTML(e.suspect, { size: 'md' })}${cardHTML(e.weapon, { size: 'md' })}${cardHTML(e.room, { size: 'md' })}</div>`,
           3200,
           'wide',
+          'suspect',
         );
+        duckMusic(3500);
         break;
       case 'noOneRefuted':
         if (e.player !== me) announce(el, `🤫 Personne ne peut répondre !`, 2000);
@@ -409,14 +427,14 @@ function announceLog(el: HTMLElement, v: PlayerView, fresh: LogEntry[], me: stri
         break;
       case 'accused':
         announce(el, `⚖️ ${n(e.player)}<div class="sub">lance une accusation !</div>`, 1800);
-        announce(el, e.correct ? `<div class="title gold">C'est juste !</div>` : `<div class="title red">C'est faux…</div>`, 2200, e.correct ? 'win' : 'lose');
+        announce(el, e.correct ? `<div class="title gold">C'est juste !</div>` : `<div class="title red">C'est faux…</div>`, 2200, e.correct ? 'win' : 'lose', e.correct ? 'win' : 'wrong');
         break;
       case 'eliminated':
         announce(el, `${n(e.player)}<div class="sub">est éliminé (mais montre toujours ses cartes)</div>`, 2200);
         break;
       case 'gameOver':
         if (e.reason === 'abandoned') announce(el, `Partie abandonnée`, 2200);
-        else if (e.winner) announce(el, `🏆 ${n(e.winner)}<div class="sub">a gagné !</div>`, 3000, 'win');
+        else if (e.winner) announce(el, `🏆 ${n(e.winner)}<div class="sub">a gagné !</div>`, 3000, 'win', 'win');
         break;
       default:
         break;
@@ -704,7 +722,7 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   if (g.phase !== 'finished' && ui.announcedTurn !== g.turn && g.phase === 'start') {
     ui.announcedTurn = g.turn;
     const newRound = (g.turn - 1) % g.players.length === 0;
-    if (newRound) announce(el, `<div class="title gold">${roundOf(g) === 1 ? '1<sup>er</sup> tour' : `Tour ${roundOf(g)}`}</div>`, 1400, 'round');
+    if (newRound) announce(el, `<div class="title gold">${roundOf(g) === 1 ? '1<sup>er</sup> tour' : `Tour ${roundOf(g)}`}</div>`, 1400, 'round', 'reveal');
     const cur = v.players.find((p) => p.id === g.currentPlayer)!;
     const sus = SUSPECTS.find((s) => s.id === cur.suspect)!;
     announce(
@@ -713,6 +731,8 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
         ? `<div class="avatar-big">${portraitHTML(sus.id)}</div><div class="sub">${sus.name}</div><div class="title">À toi de jouer !</div>`
         : `<div class="avatar-big">${portraitHTML(sus.id)}</div><div class="sub">Tour de</div><div class="title">${esc(cur.name)}</div><div class="sub">${sus.name}</div>`,
       1700,
+      '',
+      g.currentPlayer === me ? 'myTurn' : 'turn',
     );
   }
 }
@@ -728,7 +748,10 @@ function showReveal(el: HTMLElement, title: string, card: CardId | null) {
     : '<div class="reveal-none">🤫</div><p class="muted">Aucun joueur n’a ces cartes… sauf peut-être toi !</p>'}
     <button class="primary" id="reveal-ok">OK</button></div>`;
   el.appendChild(ov);
-  requestAnimationFrame(() => setTimeout(() => ov.classList.add('flipped'), 500));
+  requestAnimationFrame(() => setTimeout(() => {
+    ov.classList.add('flipped');
+    sfx(card ? 'reveal' : 'flip');
+  }, 500));
   ov.querySelector('#reveal-ok')!.addEventListener('click', () => ov.remove());
 }
 

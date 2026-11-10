@@ -4,6 +4,7 @@
 // et anime les changements (déplacements, dés, hypothèses). Quand le joueur touche
 // une case accessible, il appelle onPick.
 
+import { play as sfx } from '../ui/sound';
 import type Phaser from 'phaser';
 import {
   BOARD_HEIGHT,
@@ -526,6 +527,7 @@ function makeSceneClass(P: typeof Phaser) {
     private async playEntries(entries: LogEntry[], state: GameState) {
       for (const e of entries) {
         if (e.type === 'rolled') {
+          sfx('dice');
           await this.owner.rollDice(e.dice);
           this.owner.onEvent?.({ type: 'dice', total: e.dice.reduce((a, b) => a + b, 0), player: e.player });
         }

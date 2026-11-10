@@ -5,6 +5,7 @@ import '@fontsource/playfair-display/700.css';
 import '@fontsource/lora/400.css';
 import '@fontsource/lora/600.css';
 import './style.css';
+import { setupAudioUnlock } from './games/cluedo/ui/sound';
 import { applyCharteCss } from './theme/charte';
 import './pwa';
 import { renderHome, startOnline } from './screens/online';
@@ -12,6 +13,7 @@ import { startLocal } from './screens/local';
 import { destroyGameView } from './games/cluedo/ui/gameView';
 
 applyCharteCss();
+setupAudioUnlock();
 const app = document.getElementById('app')!;
 let cleanup: (() => void) | null = null;
 

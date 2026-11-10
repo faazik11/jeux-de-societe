@@ -30,6 +30,7 @@ import { makeWeapon } from './weapons3d';
 import { Dice3D } from './dice3d';
 import { buildFurniture } from './furniture3d';
 import { CHARTE } from '../../../theme/charte';
+import { play as sfx } from '../ui/sound';
 import { CARD_PIC_RECT, cardFocus, cardImage, cardSVG } from '../ui/cards';
 
 const P = CHARTE.plateau;
@@ -435,7 +436,10 @@ export class Board3D {
 
   private openDoor(key: string, open: boolean) {
     const d = this.doors.get(key);
-    if (d) d.target = open ? d.open : 0;
+    if (d) {
+      if (open && d.target === 0) sfx('door');
+      d.target = open ? d.open : 0;
+    }
   }
 
   private buildDecor(it: DecorItem) {
@@ -635,6 +639,7 @@ export class Board3D {
       this.orbit = null;
       this.lookFrom(center, 6.5, 2.6);
     }
+    sfx('dice');
     const walls = this.wallBoxes.filter((b) => Math.abs(b.center.x - cx) < 3 && Math.abs(b.center.z - cz) < 3);
     await this.dice.roll(values, { center, halfX: 1.1, halfZ: 1.0, y: 0.04, obstacles: walls }, (c) => {
       if (!this.userCamera) this.camGoal.look.lerp(c, 0.06);
@@ -685,6 +690,7 @@ export class Board3D {
         }
         const pt = points[i++];
         if (pt.door) this.openDoor(pt.door, true);
+        sfx('step');
         const from = f.root.position.clone();
         const to = pt.p;
         const dur = Math.max(0.1, from.distanceTo(to) / SPEED);
@@ -715,6 +721,7 @@ export class Board3D {
     const dest = world(g.x, g.y);
     if (f.position.distanceTo(dest) < 0.01) return;
     this.sparkle(f.position.clone().add(new THREE.Vector3(0, 0.6, 0)));
+    sfx('teleport');
     await this.tween(300, (k) => f.scale.set(1 - k * 0.8, 1 + k * 0.8, 1 - k * 0.8));
     f.visible = false;
     f.position.copy(dest);
@@ -745,6 +752,7 @@ export class Board3D {
       m.position.y = Math.max(0, y);
       m.rotation.y += 0.15;
     });
+    sfx('drop');
     m.position.copy(dest);
     this.sparkle(dest.clone().add(new THREE.Vector3(0, 0.1, 0)), 0xdfe6ee);
   }
@@ -760,6 +768,7 @@ export class Board3D {
       this.scene.add(m);
       return m;
     };
+    sfx('passage');
     const h1 = hole(f.position);
     await this.tween(300, (k) => h1.scale.setScalar(k));
     const start = f.position.clone();
@@ -917,6 +926,7 @@ export class Board3D {
     });
     // … puis se retournent une à une
     for (const m of meshes) {
+      sfx('flip');
       await this.tween(380, (k) => (m.card.rotation.y = Math.PI * (1 - k)));
       await this.wait(250);
     }
