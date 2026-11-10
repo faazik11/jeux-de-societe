@@ -140,7 +140,7 @@ export class IsoBoard {
     this.scene?.recenter();
   }
 
-  onEvent: ((e: { type: 'dice'; total: number; player: string } | { type: 'ready' }) => void) | null = null;
+  onEvent: ((e: { type: 'dice'; total: number; player: string } | { type: 'ready' } | { type: 'idle' }) => void) | null = null;
 
   update(u: BoardUpdate) {
     this.pending = u;
@@ -510,6 +510,7 @@ function makeSceneClass(P: typeof Phaser) {
           if (this.state === target) {
             this.animating = false;
             this.refreshOverlay();
+            this.owner.onEvent?.({ type: 'idle' });
             if (turnChanged) {
               this.userCamera = false;
               this.focusCurrent();

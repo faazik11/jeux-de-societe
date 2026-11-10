@@ -37,7 +37,7 @@ export class Board3DView {
   private reachKey = '';
   private failed = false;
   /** Événements pour l'interface (ex. résultat des dés une fois qu'ils sont arrêtés). */
-  onEvent: ((e: { type: 'dice'; total: number; player: string } | { type: 'ready' }) => void) | null = null;
+  onEvent: ((e: { type: 'dice'; total: number; player: string } | { type: 'ready' } | { type: 'idle' }) => void) | null = null;
 
   private constructor(private host: HTMLElement, private settings: DisplaySettings, private onUserCamera: (user: boolean) => void) {}
 
@@ -147,6 +147,7 @@ export class Board3DView {
           this.turnIntro(st, u.me);
         }
         this.refresh();
+        this.onEvent?.({ type: 'idle' });
       });
   }
 

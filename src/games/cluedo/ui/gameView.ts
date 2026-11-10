@@ -131,7 +131,7 @@ function renderNotebook(me: string, v: PlayerView, nb: Notebook): string {
     <p class="muted">Touche une case pour changer : ✗ ne l'a pas / innocent · ✓ l'a / coupable · ? doute. Les cases en gris sont remplies automatiquement.</p>`;
 }
 
-type BoardEvent = { type: 'dice'; total: number; player: string } | { type: 'ready' };
+type BoardEvent = { type: 'dice'; total: number; player: string } | { type: 'ready' } | { type: 'idle' };
 
 interface BoardLike {
   update(u: BoardUpdate): void;
@@ -159,6 +159,10 @@ interface UiState {
   queue: { html: string; ms: number; cls?: string }[];
   showing: boolean;
   lastError?: string;
+  /** Tour pour lequel l'hypothèse doit s'ouvrir toute seule (dès que le pion est arrivé). */
+  pendingSuggest?: number;
+  /** Tour pour lequel elle s'est déjà ouverte (on ne la rouvre pas si le joueur la ferme). */
+  autoSuggested?: number;
 }
 
 /** Plateaux prêts (les annonces attendent que le plateau soit affiché). */
@@ -330,9 +334,34 @@ function onBoardEvent(el: HTMLElement, e: BoardEvent) {
     if (ui && !ui.showing) setTimeout(() => nextAnnounce(el), 400);
     return;
   }
+  if (e.type === 'idle') {
+    openPendingSuggest(el, 900);
+    return;
+  }
   if (e.type === 'dice') {
     announce(el, `<div class="big-number">${e.total}</div><div class="sub">${nameOf(o.state, e.player, o.me)}</div>`, 1500, 'dice');
   }
+}
+
+/** Ouvre le volet « hypothèse » prévu, une fois le pion arrivé et les annonces passées. */
+function openPendingSuggest(el: HTMLElement, delay: number) {
+  setTimeout(() => {
+    const ui = uiStates.get(el);
+    const o = lastOptions.get(el);
+    if (!ui || !o || ui.pendingSuggest === undefined) return;
+    if (ui.pendingSuggest !== o.state.turn) {
+      ui.pendingSuggest = undefined;
+      return;
+    }
+    // On attend la fin des annonces au milieu de l'écran
+    if (ui.showing || ui.queue.length) return openPendingSuggest(el, 500);
+    ui.autoSuggested = ui.pendingSuggest;
+    ui.pendingSuggest = undefined;
+    if (getAvailableActions(o.state, o.me).suggest && !ui.sheet) {
+      ui.sheet = 'suggest';
+      rerender(el);
+    }
+  }, delay);
 }
 
 /** Ordre de jeu : index du joueur dans la liste (pour savoir quand un nouveau « tour de table » commence). */
@@ -358,7 +387,7 @@ function announceLog(el: HTMLElement, v: PlayerView, fresh: LogEntry[], me: stri
         announce(
           el,
           `<div class="sub">${n(e.player)} soupçonne…</div>
-          <div class="card-row center tight">${cardHTML(e.suspect, { size: 'sm' })}${cardHTML(e.weapon, { size: 'sm' })}${cardHTML(e.room, { size: 'sm' })}</div>`,
+          <div class="card-row center tight">${cardHTML(e.suspect, { size: 'md' })}${cardHTML(e.weapon, { size: 'md' })}${cardHTML(e.room, { size: 'md' })}</div>`,
           3200,
           'wide',
         );
@@ -416,6 +445,16 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   else if (ui.sheet === 'refute') ui.sheet = null;
   if (g.phase === 'finished' && ui.sheet !== 'end' && ui.sheet !== 'log') ui.sheet = ui.sheet ?? null;
   if (ui.sheet === 'suggest' && !a.suggest) ui.sheet = null;
+  // Je viens d'entrer dans une pièce (à pied ou par un passage secret) : l'hypothèse s'ouvre toute seule
+  const lastEntry = g.log[g.log.length - 1];
+  const justEntered =
+    !!lastEntry &&
+    ((lastEntry.type === 'moved' && lastEntry.player === me && lastEntry.path[lastEntry.path.length - 1].type === 'room') ||
+      (lastEntry.type === 'secretPassage' && lastEntry.player === me));
+  if (a.suggest && justEntered && !paused && ui.autoSuggested !== g.turn && ui.pendingSuggest !== g.turn) {
+    ui.pendingSuggest = g.turn;
+    openPendingSuggest(el, 15000); // sécurité si le plateau ne prévient pas
+  }
   if (ui.sheet === 'accuse' && !a.accuse) ui.sheet = null;
 
   // ---------------- Barre des joueurs (en haut)
@@ -482,14 +521,14 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   const backdrop = el.querySelector<HTMLElement>('#sheet-backdrop')!;
   const picker = (items: readonly { id: string }[], field: 'sSus' | 'sWea' | 'aSus' | 'aWea' | 'aRoo') =>
     `<div class="card-row">${items
-      .map((c) => cardHTML(c.id as CardId, { size: 'sm', attrs: `data-pick="${field}" data-id="${c.id}"`, selected: ui![field] === c.id, note: myHand.includes(c.id as CardId) ? 'ta carte' : undefined }))
+      .map((c) => cardHTML(c.id as CardId, { size: 'md', attrs: `data-pick="${field}" data-id="${c.id}"`, selected: ui![field] === c.id, note: myHand.includes(c.id as CardId) ? 'ta carte' : undefined }))
       .join('')}</div>`;
   const nbKey = notebookKey(me, myHand);
   const nb = loadNotebook(nbKey);
   let content = '';
   switch (ui.sheet) {
     case 'cards':
-      content = `<h2>Mes cartes</h2><div class="card-row center">${myHand.map((c) => cardHTML(c, { size: 'md' })).join('')}</div>
+      content = `<h2>Mes cartes</h2><div class="card-row center">${myHand.map((c) => cardHTML(c, { size: 'lg' })).join('')}</div>
         <p class="muted">Ces cartes ne sont pas dans l'enveloppe : leurs suspects, armes et pièces sont innocents.</p>`;
       break;
     case 'notebook':
@@ -514,7 +553,7 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
       const p = g.pending!;
       content = `<h2>Montre une carte</h2>
         <p>${nameOf(v, p.by, me)} soupçonne :</p>
-        <div class="card-row center tight">${cardHTML(p.suspect, { size: 'sm' })}${cardHTML(p.weapon, { size: 'sm' })}${cardHTML(p.room, { size: 'sm' })}</div>
+        <div class="card-row center tight">${cardHTML(p.suspect, { size: 'md' })}${cardHTML(p.weapon, { size: 'md' })}${cardHTML(p.room, { size: 'md' })}</div>
         <p class="callout">Tu as ${a.showCard.length > 1 ? 'plusieurs de ces cartes : choisis celle' : 'une de ces cartes : touche-la'} pour la montrer. <b>Lui seul la verra.</b></p>
         <div class="card-row center">${a.showCard.map((c) => cardHTML(c, { size: 'lg', attrs: `data-show="${c}"` })).join('')}</div>`;
       break;
