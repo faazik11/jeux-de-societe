@@ -1,7 +1,7 @@
 // Page de démonstration du plateau en vraie 3D (prototype).
 // Seuls les déplacements sont jouables : le but est de comparer le rendu avec la version isométrique.
 
-import { applyAction, createGame, getDestinations, getCard, SUSPECTS, type GameState } from '../games/cluedo/engine';
+import { applyAction, createGame, getDestinations, getCard, SUSPECTS, WEAPONS, type GameState, type WeaponId } from '../games/cluedo/engine';
 
 export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
   let destroyed = false;
@@ -47,7 +47,8 @@ export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
     board!.setCurrent(suspectOf(cur));
     info.innerHTML = `Au tour de ${name(cur)} : lance les dés.`;
     rollBtn.disabled = false;
-    if (board!.mode === 'auto') board!.focusOn(suspectOf(cur));
+    // Début du tour : vue d'ensemble
+    if (board!.mode === 'auto') board!.overview();
   };
 
   rollBtn.addEventListener('click', async () => {
@@ -58,7 +59,14 @@ export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
     await board.rollDice(game.dice!);
     const total = game.dice!.reduce((a, b) => a + b, 0);
     const dests = getDestinations(game);
-    info.innerHTML = `${name(game.currentPlayer)} a fait <b>${total}</b> : touche une case verte ou une pièce en surbrillance.`;
+    info.innerHTML = `${name(game.currentPlayer)} a fait <b>${total}</b> : touche une case verte ou une pièce avec une flèche.`;
+    // Après les dés : la caméra passe derrière le personnage, tournée vers là où il peut aller
+    if (dests.length && board.mode === 'auto') {
+      const s = suspectOf(game.currentPlayer);
+      const pts = dests.map((d) => board!.destPoint(d, s));
+      const c = pts.reduce((a, b) => a.add(b), pts[0].clone().multiplyScalar(0)).multiplyScalar(1 / pts.length);
+      board.behind(s, c);
+    }
     board.setReach(dests, async (dest) => {
       board!.setReach([], () => {});
       const cur = game.currentPlayer;
@@ -68,9 +76,8 @@ export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
       if (last.type === 'moved') await board!.walk(suspectOf(cur), last.path);
       if (dest.to.type === 'room') {
         info.innerHTML = `${name(cur)} entre dans : <b>${getCard(dest.to.room).name}</b>`;
-        board!.emote(suspectOf(cur), 'emote-yes');
-        if (board!.mode === 'auto') board!.roomShot(dest.to.room);
-        await new Promise((r) => setTimeout(r, 2600));
+        board!.emote(suspectOf(cur));
+        await new Promise((r) => setTimeout(r, 1800));
       } else await new Promise((r) => setTimeout(r, 400));
       if (destroyed) return;
       game = applyAction(game, { type: 'endTurn', player: cur });
@@ -87,7 +94,7 @@ export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
   camBtn.addEventListener('click', () => {
     if (!board) return;
     board.setMode(board.mode === 'auto' ? 'free' : 'auto');
-    if (board.mode === 'auto') board.focusOn(suspectOf(game.currentPlayer));
+    if (board.mode === 'auto') board.overview();
   });
   app.querySelector('#p3d-over')!.addEventListener('click', () => {
     if (!board) return;
@@ -100,14 +107,16 @@ export function startProto3D(app: HTMLElement, goHome: () => void): () => void {
     if (destroyed) return;
     const host = app.querySelector<HTMLElement>('#p3d-host')!;
     board = new Board3D(host);
+    host.addEventListener('preview', () => {
+      info.innerHTML = 'Chemin affiché en blanc : <b>touche à nouveau la case jaune</b> pour y aller.';
+    });
     host.addEventListener('cammode', (e) => {
       camBtn.textContent = (e as CustomEvent).detail === 'auto' ? '🎥 Caméra auto' : '🖐 Caméra libre';
     });
     for (const s of SUSPECTS) board.place(s.id, game.pawns[s.id]);
-    info.innerHTML = 'Chargement des personnages…';
+    for (const w of WEAPONS) board.placeWeapon(w.id as WeaponId, game.weapons[w.id as WeaponId]);
+    info.innerHTML = 'Chargement des meubles…';
     await board.ready;
-    info.innerHTML = 'Vraie 3D : fais glisser pour tourner autour du plateau, pince pour zoomer.';
-    if (!location.search.includes('nointro')) await board.intro();
     if (!destroyed) showTurn();
   })();
 

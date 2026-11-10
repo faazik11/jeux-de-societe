@@ -18,10 +18,13 @@ import {
   type Position,
   type RoomId,
   type SuspectId,
+  type WeaponId,
+  WEAPONS,
 } from '../games/cluedo/engine';
 import { DECOR, FLOOR, WALL, type DecorItem } from '../games/cluedo/board3d/decor';
-import { type Figure } from './figure';
-import { loadCharacter } from './characters';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { makeFigure, type Figure } from './figure';
+import { makeWeapon } from './weapons3d';
 import { Dice3D } from './dice3d';
 import { buildFurniture } from './furniture3d';
 
@@ -41,16 +44,24 @@ function roomSlot(room: RoomId, suspect: SuspectId) {
   return { x: r.x + r.w / 2 + ((i % 3) - 1) * 0.85, y: r.y + r.h / 2 + Math.floor(i / 3) * 0.85 - 0.1 };
 }
 
+function weaponSlot(room: RoomId, weapon: WeaponId) {
+  const r = ROOM_RECTS[room];
+  const i = WEAPONS.findIndex((w) => w.id === weapon);
+  return { x: r.x + 0.55 + i * ((r.w - 1.1) / 5), y: r.y + r.h - 0.55 };
+}
+
 function gridOf(p: Position, s: SuspectId) {
   return p.type === 'cell' ? { x: p.x + 0.5, y: p.y + 0.5 } : roomSlot(p.room, s);
 }
 
 type CamMode = 'auto' | 'free';
 
-interface WallSeg {
-  mesh: THREE.Mesh;
-  normal: THREE.Vector3; // vers l'extérieur de la pièce
-  center: THREE.Vector3;
+interface Door {
+  pivot: THREE.Group;
+  open: number; // angle quand la porte est ouverte
+  target: number;
+  /** Case de la pièce juste derrière la porte. */
+  inside: { x: number; y: number };
 }
 
 export class Board3D {
@@ -62,14 +73,18 @@ export class Board3D {
   private raf = 0;
   private ro: ResizeObserver;
 
-  private figures = new Map<SuspectId, Figure & { emote(name: string): void }>();
+  private figures = new Map<SuspectId, Figure>();
+  private weapons = new Map<WeaponId, THREE.Group>();
+  private doors = new Map<string, Door>();
+  private envMap: THREE.Texture | null = null;
+  private pathGroup = new THREE.Group();
+  private hoverKey: string | null = null;
   private pending = new Map<SuspectId, Position>();
   private dice!: Dice3D;
   /** Se résout quand les personnages 3D sont chargés. */
   ready: Promise<void>;
   private furnitureReady: Promise<void> = Promise.resolve();
   private walking = new Set<SuspectId>();
-  private walls: WallSeg[] = [];
   private highlight = new THREE.Group();
   private ring: THREE.Mesh;
   private fireLight: THREE.PointLight | null = null;
@@ -108,9 +123,13 @@ export class Board3D {
       if (this.mode === 'auto') this.setMode('free');
     });
 
+    // Reflets pour les armes en métal
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
     this.buildLights();
     this.buildBoard();
-    this.scene.add(this.highlight);
+    this.scene.add(this.highlight, this.pathGroup);
 
     this.ring = new THREE.Mesh(
       new THREE.RingGeometry(0.28, 0.36, 32),
@@ -120,15 +139,18 @@ export class Board3D {
     this.ring.position.y = 0.02;
     this.scene.add(this.ring);
 
-    this.ready = Promise.all(
-      SUSPECTS.map(async (s) => {
-        const f = await loadCharacter(s.id, parseInt(s.color.slice(1), 16));
-        this.scene.add(f.root);
-        this.figures.set(s.id, f);
-        const p = this.pending.get(s.id);
-        if (p) this.place(s.id, p);
-      }),
-    ).then(() => this.furnitureReady);
+    for (const s of SUSPECTS) {
+      const f = makeFigure(parseInt(s.color.slice(1), 16));
+      this.scene.add(f.root);
+      this.figures.set(s.id, f);
+    }
+    for (const w of WEAPONS) {
+      const m = makeWeapon(w.id as WeaponId, this.envMap);
+      m.visible = false;
+      this.scene.add(m);
+      this.weapons.set(w.id as WeaponId, m);
+    }
+    this.ready = this.furnitureReady;
 
     const c = CENTER_RECT;
     this.dice = new Dice3D(this.scene, {
@@ -288,28 +310,107 @@ export class Board3D {
       else if (d.x === r.x + r.w) gaps.e.add(d.y);
     }
     const T = 0.12;
-    const wallMat = new THREE.MeshStandardMaterial({ color: WALL.color, roughness: 0.9 });
-    const geoX = new THREE.BoxGeometry(1, 1, T);
-    const geoZ = new THREE.BoxGeometry(T, 1, 1);
-    const add = (geo: THREE.BoxGeometry, x: number, y: number, normal: THREE.Vector3) => {
-      const mesh = new THREE.Mesh(geo, wallMat);
-      mesh.scale.y = WALL_H;
-      const center = world(x, y, 0);
-      mesh.position.set(center.x, WALL_H / 2, center.z);
+    const wallMat = this.wallMat;
+    const add = (x: number, y: number, w: number, d: number, h = WALL_H, y0 = 0) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      const c = world(x, y, 0);
+      mesh.position.set(c.x, y0 + h / 2, c.z);
       mesh.castShadow = mesh.receiveShadow = true;
       this.scene.add(mesh);
-      this.walls.push({ mesh, normal, center });
     };
+    // Murs (toujours visibles), avec une ouverture à chaque porte
     for (let i = 0; i < r.w; i++) {
       const x = r.x + i + 0.5;
-      if (!gaps.n.has(r.x + i)) add(geoX, x, r.y + T / 2, new THREE.Vector3(0, 0, -1));
-      if (!gaps.s.has(r.x + i)) add(geoX, x, r.y + r.h - T / 2, new THREE.Vector3(0, 0, 1));
+      if (!gaps.n.has(r.x + i)) add(x, r.y + T / 2, 1, T);
+      if (!gaps.s.has(r.x + i)) add(x, r.y + r.h - T / 2, 1, T);
     }
     for (let j = 0; j < r.h; j++) {
       const y = r.y + j + 0.5;
-      if (!gaps.w.has(r.y + j)) add(geoZ, r.x + T / 2, y, new THREE.Vector3(-1, 0, 0));
-      if (!gaps.e.has(r.y + j)) add(geoZ, r.x + r.w - T / 2, y, new THREE.Vector3(1, 0, 0));
+      if (!gaps.w.has(r.y + j)) add(r.x + T / 2, y, T, 1);
+      if (!gaps.e.has(r.y + j)) add(r.x + r.w - T / 2, y, T, 1);
     }
+    // Portes
+    for (const d of DOORS.filter((dd) => dd.room === room)) this.buildDoor(d.x, d.y, room, add);
+  }
+
+  private wallMat = new THREE.MeshStandardMaterial({ color: WALL.color, roughness: 0.9 });
+  private doorMat = new THREE.MeshStandardMaterial({ color: 0x7a4a26, roughness: 0.6 });
+  private frameMat = new THREE.MeshStandardMaterial({ color: 0x4e2f18, roughness: 0.6 });
+  private brassMat = new THREE.MeshStandardMaterial({ color: 0xd4a942, roughness: 0.3, metalness: 0.9 });
+
+  /** Porte en bois avec encadrement ; elle s'ouvre vers l'intérieur quand quelqu'un passe. */
+  private buildDoor(dx: number, dy: number, room: RoomId, addWall: (x: number, y: number, w: number, d: number, h?: number, y0?: number) => void) {
+    const r = ROOM_RECTS[room];
+    const T = 0.12;
+    const DOOR_H = 1.12;
+    const LEAF = 0.86;
+    const horizontal = dy === r.y - 1 || dy === r.y + r.h; // mur nord ou sud
+    let hinge: THREE.Vector3;
+    let open: number;
+    let inside: { x: number; y: number };
+    if (dy === r.y - 1) {
+      hinge = world(dx + 0.07, r.y + T / 2);
+      open = -Math.PI / 2;
+      inside = { x: dx, y: r.y };
+      addWall(dx + 0.5, r.y + T / 2, 1, T, WALL_H - DOOR_H, DOOR_H);
+    } else if (dy === r.y + r.h) {
+      hinge = world(dx + 0.07, r.y + r.h - T / 2);
+      open = Math.PI / 2;
+      inside = { x: dx, y: r.y + r.h - 1 };
+      addWall(dx + 0.5, r.y + r.h - T / 2, 1, T, WALL_H - DOOR_H, DOOR_H);
+    } else if (dx === r.x - 1) {
+      hinge = world(r.x + T / 2, dy + 0.07);
+      open = Math.PI / 2;
+      inside = { x: r.x, y: dy };
+      addWall(r.x + T / 2, dy + 0.5, T, 1, WALL_H - DOOR_H, DOOR_H);
+    } else {
+      hinge = world(r.x + r.w - T / 2, dy + 0.07);
+      open = -Math.PI / 2;
+      inside = { x: r.x + r.w - 1, y: dy };
+      addWall(r.x + r.w - T / 2, dy + 0.5, T, 1, WALL_H - DOOR_H, DOOR_H);
+    }
+    // Encadrement
+    const frame = (fx: number, fy: number) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(horizontal ? 0.07 : 0.16, DOOR_H, horizontal ? 0.16 : 0.07), this.frameMat);
+      const c = world(fx, fy);
+      post.position.set(c.x, DOOR_H / 2, c.z);
+      post.castShadow = true;
+      this.scene.add(post);
+    };
+    if (horizontal) {
+      const fy = dy === r.y - 1 ? r.y + T / 2 : r.y + r.h - T / 2;
+      frame(dx + 0.035, fy);
+      frame(dx + 0.965, fy);
+    } else {
+      const fx = dx === r.x - 1 ? r.x + T / 2 : r.x + r.w - T / 2;
+      frame(fx, dy + 0.035);
+      frame(fx, dy + 0.965);
+    }
+    // Battant
+    const pivot = new THREE.Group();
+    pivot.position.set(hinge.x, 0, hinge.z);
+    const leaf = new THREE.Mesh(
+      new THREE.BoxGeometry(horizontal ? LEAF : 0.05, DOOR_H - 0.04, horizontal ? 0.05 : LEAF),
+      this.doorMat,
+    );
+    leaf.position.set(horizontal ? LEAF / 2 : 0, (DOOR_H - 0.04) / 2, horizontal ? 0 : LEAF / 2);
+    leaf.castShadow = leaf.receiveShadow = true;
+    // Panneaux décoratifs + poignée
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(horizontal ? LEAF * 0.7 : 0.06, 0.35, horizontal ? 0.06 : LEAF * 0.7), this.frameMat);
+    panel.position.set(leaf.position.x, 0.75, leaf.position.z);
+    const panel2 = panel.clone();
+    panel2.position.y = 0.3;
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), this.brassMat);
+    knob.position.set(horizontal ? LEAF - 0.1 : 0, 0.55, horizontal ? 0 : LEAF - 0.1);
+    knob.scale.set(horizontal ? 1 : 2.4, 1, horizontal ? 2.4 : 1);
+    pivot.add(leaf, panel, panel2, knob);
+    this.scene.add(pivot);
+    this.doors.set(`${dx},${dy}`, { pivot, open, target: 0, inside });
+  }
+
+  private openDoor(key: string, open: boolean) {
+    const d = this.doors.get(key);
+    if (d) d.target = open ? d.open : 0;
   }
 
   private buildDecor(it: DecorItem) {
@@ -421,8 +522,16 @@ export class Board3D {
     f.root.rotation.y = 0;
   }
 
-  emote(s: SuspectId, name = 'emote-yes') {
-    this.figures.get(s)?.emote(name);
+  emote(s: SuspectId) {
+    this.figures.get(s)?.emote();
+  }
+
+  placeWeapon(w: WeaponId, room: RoomId) {
+    const m = this.weapons.get(w)!;
+    const g = weaponSlot(room, w);
+    m.position.copy(world(g.x, g.y));
+    m.rotation.y = (WEAPONS.findIndex((x) => x.id === w) * 1.3) % (Math.PI * 2);
+    m.visible = true;
   }
 
   /** Lance les dés 3D sur la table centrale. */
@@ -443,10 +552,30 @@ export class Board3D {
   /** Fait marcher un personnage le long d'un chemin, case par case. */
   walk(s: SuspectId, path: Position[]): Promise<void> {
     const f = this.figures.get(s)!;
-    const points = path.slice(1).map((p) => {
-      const g = gridOf(p, s);
-      return world(g.x, g.y);
-    });
+    // Points de passage : on ajoute la case juste derrière la porte pour ne pas traverser les murs,
+    // et on ouvre la porte au bon moment.
+    const points: { p: THREE.Vector3; door?: string }[] = [];
+    const opened: string[] = [];
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1];
+      const b = path[i];
+      if (a.type === 'cell' && b.type === 'room') {
+        const key = `${a.x},${a.y}`;
+        const door = this.doors.get(key);
+        if (door) points.push({ p: world(door.inside.x + 0.5, door.inside.y + 0.5), door: key });
+        opened.push(key);
+      } else if (a.type === 'room' && b.type === 'cell') {
+        const key = `${b.x},${b.y}`;
+        const door = this.doors.get(key);
+        if (door) points.push({ p: world(door.inside.x + 0.5, door.inside.y + 0.5), door: key });
+        opened.push(key);
+        const g = gridOf(b, s);
+        points.push({ p: world(g.x, g.y) });
+        continue;
+      }
+      const g = gridOf(b, s);
+      points.push({ p: world(g.x, g.y) });
+    }
     this.walking.add(s);
     if (this.mode === 'auto' && this.followEnabled) this.follow = s;
     const SPEED = 2.6; // cases par seconde
@@ -456,10 +585,13 @@ export class Board3D {
         if (i >= points.length) {
           this.walking.delete(s);
           this.follow = null;
+          setTimeout(() => opened.forEach((k) => this.openDoor(k, false)), 500);
           return resolve();
         }
         const from = f.root.position.clone();
-        const to = points[i++];
+        const pt = points[i++];
+        if (pt.door) this.openDoor(pt.door, true);
+        const to = pt.p;
         const dist = from.distanceTo(to);
         const dur = Math.max(0.12, dist / SPEED);
         const targetYaw = Math.atan2(to.x - from.x, to.z - from.z);
@@ -484,8 +616,12 @@ export class Board3D {
   }
 
   private tickers = new Set<(dt: number) => void>();
-  private hlCell = new THREE.MeshBasicMaterial({ color: 0x5fd35f, transparent: true, opacity: 0.55, depthWrite: false });
-  private hlRoom = new THREE.MeshBasicMaterial({ color: 0x5fd35f, transparent: true, opacity: 0.22, depthWrite: false });
+  private hlCell = new THREE.MeshStandardMaterial({ color: 0x35d06a, emissive: 0x1aa34a, emissiveIntensity: 0.8, roughness: 0.4, transparent: true, opacity: 0.92 });
+  private hlHover = new THREE.MeshStandardMaterial({ color: 0xffd34d, emissive: 0xffa800, emissiveIntensity: 0.9, roughness: 0.4 });
+  private hlRoom = new THREE.MeshBasicMaterial({ color: 0x35d06a, transparent: true, opacity: 0.25, depthWrite: false });
+  private hlEdge = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+  private arrows: THREE.Object3D[] = [];
+  private hlTiles = new Map<string, THREE.Mesh>();
 
   setCurrent(s: SuspectId | null) {
     this.ring.visible = !!s;
@@ -493,27 +629,70 @@ export class Board3D {
   }
   private current: SuspectId | null = null;
 
+  /**
+   * Affiche les cases accessibles : dalles vertes lumineuses avec un contour blanc,
+   * les pièces accessibles en vert avec une grosse flèche qui rebondit.
+   * Au survol (ou au premier toucher sur téléphone), le chemin s'affiche et la case devient jaune.
+   */
   setReach(dests: Destination[], onPick: (d: Destination) => void) {
     this.onPick = onPick;
     this.reach.clear();
     this.highlight.clear();
-    const mat = this.hlCell;
-    const roomMat = this.hlRoom;
+    this.hlTiles.clear();
+    this.arrows = [];
+    this.showPath(null);
+    const tileGeo = new THREE.BoxGeometry(0.84, 0.06, 0.84);
+    const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(0.88, 0.065, 0.88));
     for (const d of dests) {
       if (d.to.type === 'cell') {
-        this.reach.set(`${d.to.x},${d.to.y}`, d);
-        const tile = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.86), mat);
-        tile.rotation.x = -Math.PI / 2;
-        tile.position.copy(world(d.to.x + 0.5, d.to.y + 0.5, 0.035));
-        this.highlight.add(tile);
+        const key = `${d.to.x},${d.to.y}`;
+        this.reach.set(key, d);
+        const tile = new THREE.Mesh(tileGeo, this.hlCell);
+        tile.position.copy(world(d.to.x + 0.5, d.to.y + 0.5, 0.05));
+        const edge = new THREE.LineSegments(edgeGeo, this.hlEdge);
+        edge.position.copy(tile.position);
+        this.highlight.add(tile, edge);
+        this.hlTiles.set(key, tile);
       } else {
-        this.reach.set(`room:${d.to.room}`, d);
+        const key = `room:${d.to.room}`;
+        this.reach.set(key, d);
         const r = ROOM_RECTS[d.to.room];
-        const tile = new THREE.Mesh(new THREE.PlaneGeometry(r.w - 0.2, r.h - 0.2), roomMat);
-        tile.rotation.x = -Math.PI / 2;
-        tile.position.copy(world(r.x + r.w / 2, r.y + r.h / 2, 0.05));
-        this.highlight.add(tile);
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(r.w - 0.3, r.h - 0.3), this.hlRoom);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.copy(world(r.x + r.w / 2, r.y + r.h / 2, 0.06));
+        const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(r.w - 0.3, r.h - 0.3)), this.hlEdge);
+        outline.rotation.x = -Math.PI / 2;
+        outline.position.copy(floor.position);
+        // Flèche qui rebondit au-dessus de la pièce
+        const arrow = new THREE.Group();
+        const head = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.5, 20), this.hlCell);
+        head.rotation.x = Math.PI;
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.5, 14), this.hlCell);
+        stem.position.y = 0.48;
+        arrow.add(head, stem);
+        arrow.position.copy(world(r.x + r.w / 2, r.y + r.h / 2, 2.4));
+        this.highlight.add(floor, outline, arrow);
+        this.arrows.push(arrow);
       }
+    }
+  }
+
+  /** Affiche le chemin jusqu'à une destination (petites billes blanches). */
+  private showPath(key: string | null) {
+    if (key === this.hoverKey) return;
+    this.hoverKey = key;
+    this.pathGroup.clear();
+    for (const [k, t] of this.hlTiles) t.material = k === key ? this.hlHover : this.hlCell;
+    if (!key) return;
+    const d = this.reach.get(key);
+    if (!d || !this.current) return;
+    const dot = new THREE.SphereGeometry(0.08, 12, 10);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (const p of d.path.slice(1, -1)) {
+      if (p.type !== 'cell') continue;
+      const m = new THREE.Mesh(dot, mat);
+      m.position.copy(world(p.x + 0.5, p.y + 0.5, 0.15));
+      this.pathGroup.add(m);
     }
   }
 
@@ -568,6 +747,37 @@ export class Board3D {
     this.camGoal.speed = speed;
   }
 
+  /**
+   * Caméra derrière le personnage, tournée vers ses destinations possibles
+   * (assez haut pour bien voir les cases vertes).
+   */
+  behind(s: SuspectId, toward: THREE.Vector3) {
+    this.followEnabled = true;
+    const f = this.figures.get(s)!.root;
+    const yaw = Math.atan2(toward.x - f.position.x, toward.z - f.position.z);
+    // le personnage se tourne vers là où il peut aller
+    let t = 0;
+    const start = f.rotation.y;
+    let d = yaw - start;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    const turn = (dt: number) => {
+      t = Math.min(1, t + dt * 2.5);
+      f.rotation.y = start + d * t;
+      if (t >= 1) this.tickers.delete(turn);
+    };
+    this.tickers.add(turn);
+    const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    this.camGoal.pos.copy(f.position).addScaledVector(dir, -4.2).add(new THREE.Vector3(0, 4.6, 0));
+    this.camGoal.look.copy(f.position).addScaledVector(dir, 2.6);
+    this.camGoal.speed = 2.4;
+  }
+
+  /** Point au sol d'une destination (pour orienter la caméra). */
+  destPoint(d: Destination, s: SuspectId) {
+    const g = gridOf(d.to, s);
+    return world(g.x, g.y);
+  }
+
   /** Plan « cinéma » sur une pièce : depuis l'entrée, à hauteur d'homme. */
   roomShot(room: RoomId, speed = 1.6) {
     if (!this.followEnabled) return;
@@ -600,16 +810,9 @@ export class Board3D {
     this.camera.lookAt(this.camLook);
   }
 
-  /** Les murs entre la caméra et l'intérieur des pièces s'abaissent (vue « maison de poupée »). */
-  private updateWalls(dt: number) {
-    const camPos = this.camera.position;
-    for (const w of this.walls) {
-      const toCam = new THREE.Vector3(camPos.x - w.center.x, 0, camPos.z - w.center.z).normalize();
-      const facing = toCam.dot(w.normal) > 0.25;
-      const target = facing ? 0.12 : WALL_H;
-      const s = w.mesh.scale.y + (target - w.mesh.scale.y) * Math.min(1, dt * 6);
-      w.mesh.scale.y = s;
-      w.mesh.position.y = s / 2;
+  private updateDoors(dt: number) {
+    for (const d of this.doors.values()) {
+      d.pivot.rotation.y += (d.target - d.pivot.rotation.y) * Math.min(1, dt * 7);
     }
   }
 
@@ -627,11 +830,15 @@ export class Board3D {
       this.ring.scale.set(pulse, pulse, pulse);
     }
     if (this.fireLight) this.fireLight.intensity = 7 + Math.random() * 3;
-    const pulse = 0.75 + Math.sin(performance.now() / 300) * 0.25;
-    this.hlCell.opacity = 0.55 * pulse;
-    this.hlRoom.opacity = 0.25 * pulse;
+    const now = performance.now();
+    this.hlCell.emissiveIntensity = 0.55 + Math.sin(now / 260) * 0.35;
+    this.hlRoom.opacity = 0.22 + Math.sin(now / 260) * 0.08;
+    for (const a of this.arrows) {
+      a.position.y = 2.2 + Math.abs(Math.sin(now / 280)) * 0.45;
+      a.rotation.y += dt * 1.5;
+    }
     this.updateCamera(dt);
-    this.updateWalls(dt);
+    this.updateDoors(dt);
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -640,20 +847,39 @@ export class Board3D {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     let down: { x: number; y: number } | null = null;
     const el = this.renderer.domElement;
-    el.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
-    el.addEventListener('pointerup', (e) => {
-      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) return;
-      down = null;
+    const keyAt = (e: PointerEvent): string | null => {
       const rect = el.getBoundingClientRect();
       const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
       ray.setFromCamera(ndc, this.camera);
       const hit = new THREE.Vector3();
-      if (!ray.ray.intersectPlane(plane, hit)) return;
+      if (!ray.ray.intersectPlane(plane, hit)) return null;
       const gx = Math.floor(hit.x - OX);
       const gy = Math.floor(hit.z - OZ);
-      if (gx < 0 || gy < 0 || gx >= BOARD_WIDTH || gy >= BOARD_HEIGHT) return;
-      let d = this.reach.get(`${gx},${gy}`);
-      if (!d && CELLS[gy][gx] === 'room') d = this.reach.get(`room:${CELL_ROOM[gy][gx]}`);
+      if (gx < 0 || gy < 0 || gx >= BOARD_WIDTH || gy >= BOARD_HEIGHT) return null;
+      if (this.reach.has(`${gx},${gy}`)) return `${gx},${gy}`;
+      if (CELLS[gy][gx] === 'room' && this.reach.has(`room:${CELL_ROOM[gy][gx]}`)) return `room:${CELL_ROOM[gy][gx]}`;
+      return null;
+    };
+    el.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
+    el.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'mouse' && this.reach.size) {
+        const k = keyAt(e);
+        this.showPath(k);
+        el.style.cursor = k ? 'pointer' : '';
+      }
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) return;
+      down = null;
+      const k = keyAt(e);
+      if (!k) return;
+      // Sur écran tactile : 1er toucher = aperçu du chemin, 2e toucher = on y va
+      if (e.pointerType !== 'mouse' && this.hoverKey !== k) {
+        this.showPath(k);
+        this.host.dispatchEvent(new CustomEvent('preview'));
+        return;
+      }
+      const d = this.reach.get(k);
       if (d) this.onPick?.(d);
     });
   }
