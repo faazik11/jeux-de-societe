@@ -3,6 +3,7 @@
 import { SUSPECTS, type SuspectId } from '../games/cluedo/engine';
 import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
 import { ensureSignedIn, multiTabTest } from '../online/firebase';
+import { renderInstall } from '../pwa';
 import {
   chooseSuspect,
   createRoom,
@@ -54,8 +55,10 @@ export function renderHome(app: HTMLElement, go: (hash: string) => void, error =
       </div>
     </div>
     <div class="error" id="err">${esc(error)}</div>
+    <div id="install"></div>
     <p class="muted"><a href="#/test" style="color:var(--muted)">Mode test (tous sur le même écran)</a></p>`;
 
+  renderInstall(app.querySelector<HTMLElement>('#install')!);
   const nameInput = app.querySelector<HTMLInputElement>('#name')!;
   const err = app.querySelector<HTMLElement>('#err')!;
   const getName = () => {

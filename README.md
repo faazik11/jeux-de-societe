@@ -12,7 +12,8 @@ Site : https://faazik11.github.io/jeux-de-societe/
 - [x] Plateau isométrique animé (Phaser) : décor, pions, déplacements, dés, caméra qui suit le joueur
 - [x] Plateau 3D (Three.js) : caméra « table », dés physiques, portes, mises en scène (hypothèse, passage secret, accusation, fin)
 - [ ] Thème original et graphismes
-- [ ] Appli installable sur l'écran d'accueil (PWA)
+- [x] Appli installable sur l'écran d'accueil (PWA), utilisable hors ligne en mode test
+- [x] Cartes illustrées, carte montrée qui se retourne, carnet d'enquête en grille, onglets sur téléphone
 
 ## Organisation du code
 

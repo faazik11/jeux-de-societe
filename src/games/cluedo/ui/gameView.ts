@@ -1,9 +1,10 @@
-// Écran de partie (version simple vue de dessus, en attendant le plateau isométrique).
+// Écran de partie : plateau (3D ou 2.5D) + panneau de jeu (actions, cartes, carnet, journal).
 // Utilisé à la fois par le mode test local et par le jeu en ligne.
 
 import { IsoBoard, type BoardUpdate } from '../board3d/IsoBoard';
 import { Board3DView } from '../board3d/Board3DView';
 import { loadSettings, saveSettings, webglAvailable, type DisplaySettings } from './settings';
+import { cardBackHTML, cardHTML } from './cards';
 import {
   ROOMS,
   SUSPECTS,
@@ -35,8 +36,26 @@ export interface GameViewOptions {
   onExit?: { label: string; run: () => void };
 }
 
-const notebooks = new Map<string, Record<string, string>>();
-const MARKS = ['', '✗', '?', '✓'];
+const MARKS = ['', '✗', '✓', '?'];
+type Notebook = Record<string, string>; // clé « carte » ou « carte|joueur » -> marque
+
+function notebookKey(me: string, hand: CardId[]) {
+  return `jds:nb:${me}:${[...hand].sort().join(',')}`;
+}
+function loadNotebook(key: string): Notebook {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+function saveNotebook(key: string, nb: Notebook) {
+  try {
+    localStorage.setItem(key, JSON.stringify(nb));
+  } catch {
+    /* rien */
+  }
+}
 
 const suspectColor = (id: SuspectId) => SUSPECTS.find((s) => s.id === id)!.color;
 export const esc = (t: string) =>
@@ -70,20 +89,39 @@ function logLine(v: PlayerView, e: LogEntry): string {
   }
 }
 
-function renderNotebook(me: string, v: PlayerView): string {
-  const nb = notebooks.get(me) ?? {};
-  notebooks.set(me, nb);
+/**
+ * Carnet d'enquête en grille : une ligne par carte ; une colonne « bilan » et une colonne par adversaire.
+ * Ce qu'on sait déjà est pré-rempli (mes cartes, cartes qu'on m'a montrées) ; le reste se coche à la main.
+ */
+function renderNotebook(me: string, v: PlayerView, nb: Notebook): string {
   const myHand = new Set(v.players.find((p) => p.id === me)!.hand ?? []);
+  // Cartes qu'on m'a montrées : qui les a
+  const shownBy = new Map<string, string>();
+  for (const e of v.log) if (e.type === 'cardShown' && e.to === me && e.card) shownBy.set(e.card, e.player);
+  const others = v.players.filter((p) => p.id !== me);
+  const auto = (card: string, col: string): string => {
+    if (col === 'status') return myHand.has(card as CardId) || shownBy.has(card) ? '✗' : '';
+    if (myHand.has(card as CardId)) return '✗';
+    if (shownBy.get(card) === col) return '✓';
+    return '';
+  };
+  const cell = (card: string, col: string) => {
+    const key = col === 'status' ? card : `${card}|${col}`;
+    const manual = nb[key];
+    const val = manual ?? auto(card, col);
+    const cls = val === '✓' ? 'yes' : val === '✗' ? 'no' : val === '?' ? 'maybe' : '';
+    return `<td class="nb-cell ${col === 'status' ? 'status' : ''} ${cls} ${manual === undefined && val ? 'auto' : ''}" data-nb="${key}">${val}</td>`;
+  };
+  const head = `<tr><th></th><th title="Bilan">Bilan</th>${others
+    .map((p) => `<th title="${esc(p.name)}"><span class="who" style="background:${suspectColor(p.suspect)}"></span>${esc(p.name.slice(0, 3))}</th>`)
+    .join('')}</tr>`;
   const section = (title: string, cards: readonly { id: string; name: string }[]) =>
-    `<tr class="section"><td colspan="2">${title}</td></tr>` +
+    `<tr class="section"><td colspan="${2 + others.length}">${title}</td></tr>` +
     cards
-      .map(
-        (c) => `<tr><td>${c.name}${myHand.has(c.id as CardId) ? ' <span class="muted">(ma carte)</span>' : ''}</td>
-      <td class="mark" data-mark="${c.id}">${nb[c.id] ?? (myHand.has(c.id as CardId) ? '✗' : '')}</td></tr>`,
-      )
+      .map((c) => `<tr class="${myHand.has(c.id as CardId) ? 'mine' : ''}"><td class="nb-name">${c.name}</td>${cell(c.id, 'status')}${others.map((p) => cell(c.id, p.id)).join('')}</tr>`)
       .join('');
-  return `<table class="notebook">${section('Suspects', SUSPECTS)}${section('Armes', WEAPONS)}${section('Pièces', ROOMS)}</table>
-    <p class="muted">Touche une case pour cocher : ✗ innocent, ? doute, ✓ coupable.</p>`;
+  return `<div class="nb-wrap"><table class="notebook grid">${head}${section('Suspects', SUSPECTS)}${section('Armes', WEAPONS)}${section('Pièces', ROOMS)}</table></div>
+    <p class="muted">Touche une case pour changer : ✗ ne l'a pas / innocent · ✓ l'a / coupable · ? doute. Les cases en gris sont remplies automatiquement.</p>`;
 }
 
 interface BoardLike {
@@ -94,6 +132,21 @@ interface BoardLike {
 
 const boards = new WeakMap<HTMLElement, BoardLike>();
 const lastOptions = new WeakMap<HTMLElement, GameViewOptions>();
+
+/** État de l'interface qui doit survivre aux réaffichages (onglet, cartes choisies, journal déjà vu). */
+interface UiState {
+  tab: 'action' | 'cards' | 'notebook' | 'log';
+  sSus?: string;
+  sWea?: string;
+  aSus?: string;
+  aWea?: string;
+  aRoo?: string;
+  accuseOpen: boolean;
+  /** Longueur du journal déjà vue, par joueur (pour ne montrer chaque révélation qu'une fois). */
+  seen: Record<string, number>;
+  me: string;
+}
+const uiStates = new WeakMap<HTMLElement, UiState>();
 
 /** Crée la structure de l'écran (une seule fois) et le plateau (3D ou 2.5D selon les réglages). */
 function ensureLayout(el: HTMLElement): BoardLike {
@@ -175,9 +228,23 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   const dests = a.move && !paused ? getDestinations(g) : [];
   const myPos = v.pawns[mePlayer.suspect];
   const myRoom = myPos.type === 'room' ? myPos.room : null;
-  const opts = (items: readonly { id: string; name: string }[]) =>
-    items.map((i) => `<option value="${i.id}">${i.name}</option>`).join('');
   const waitingFor = g.phase === 'refuting' ? g.pending!.refuter : g.currentPlayer;
+  const myHand = mePlayer.hand ?? [];
+
+  // État d'interface (réinitialisé si le joueur qui regarde change, ex. en mode test)
+  let ui = uiStates.get(el);
+  if (!ui || ui.me !== me) {
+    ui = { tab: 'action', accuseOpen: false, seen: ui?.seen ?? {}, me };
+    uiStates.set(el, ui);
+  }
+  if (ui.seen[me] === undefined || ui.seen[me] > g.log.length) ui.seen[me] = g.log.length;
+  const myMove = !paused && g.phase !== 'finished' && (g.currentPlayer === me || a.showCard.length > 0);
+  if (myMove && ui.tab !== 'action' && (a.showCard.length > 0 || a.suggest)) ui.tab = 'action';
+
+  const picker = (items: readonly { id: string }[], field: 'sSus' | 'sWea' | 'aSus' | 'aWea' | 'aRoo') =>
+    `<div class="card-row">${items
+      .map((c) => cardHTML(c.id as CardId, { size: 'sm', attrs: `data-pick="${field}" data-id="${c.id}"`, selected: ui![field] === c.id, note: myHand.includes(c.id as CardId) ? 'ta carte' : undefined }))
+      .join('')}</div>`;
 
   let controls = '';
   if (g.phase === 'finished') {
@@ -185,69 +252,77 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
       g.endReason === 'abandoned'
         ? 'Partie abandonnée par le maître de jeu.'
         : g.winner
-          ? `${nameOf(g, g.winner, me)} a gagné !`
+          ? `🏆 ${nameOf(g, g.winner, me)} a gagné !`
           : 'Personne n’a gagné.'
-    }<br>
-      Solution : <b>${getCard(g.solution.suspect).name}</b>, avec <b>${getCard(g.solution.weapon).name}</b>, dans <b>${getCard(g.solution.room).name}</b></div>
+    }</div>
+      <p class="muted">La solution :</p>
+      <div class="card-row center">${cardHTML(g.solution.suspect)}${cardHTML(g.solution.weapon)}${cardHTML(g.solution.room)}</div>
       ${o.onExit ? `<div class="row"><button class="primary" id="exit">${esc(o.onExit.label)}</button></div>` : ''}`;
   } else if (paused) {
     controls = `<div class="banner">⏸ Partie en pause : ${o.pausedBy!.map(esc).join(', ')} ${o.pausedBy!.length > 1 ? 'sont déconnectés' : 'est déconnecté'}. Elle reprendra à son retour.</div>`;
   } else if (g.phase === 'refuting') {
     const p = g.pending!;
-    const head = `<p>${nameOf(g, p.by, me)} suppose : <b>${getCard(p.suspect).name}</b>, <b>${getCard(p.weapon).name}</b>, <b>${getCard(p.room).name}</b>.</p>`;
+    const trio = `<div class="card-row center">${cardHTML(p.suspect, { size: 'sm' })}${cardHTML(p.weapon, { size: 'sm' })}${cardHTML(p.room, { size: 'sm' })}</div>`;
     controls = a.showCard.length
-      ? `${head}<p>Choisis la carte à lui montrer (lui seul la verra) :</p>
-        <div class="row">${a.showCard.map((c) => `<button class="primary" data-show="${c}">${getCard(c).name}</button>`).join('')}</div>`
-      : `${head}<p class="muted">En attente de ${nameOf(g, p.refuter, me)}, qui doit montrer une carte…</p>`;
+      ? `<p>${nameOf(g, p.by, me)} suppose :</p>${trio}
+        <p class="callout">Tu as ${a.showCard.length > 1 ? 'plusieurs de ces cartes : choisis celle' : 'une de ces cartes : touche-la'} pour la montrer. <b>Lui seul la verra.</b></p>
+        <div class="card-row center">${a.showCard.map((c) => cardHTML(c, { size: 'lg', attrs: `data-show="${c}"` })).join('')}</div>`
+      : `<p>${nameOf(g, p.by, me)} suppose :</p>${trio}
+        <p class="muted">En attente de ${nameOf(g, p.refuter, me)}, qui doit montrer une carte…</p>`;
   } else if (g.currentPlayer !== me) {
     controls = `<p class="muted">C'est au tour de ${nameOf(g, g.currentPlayer, me)}.</p>
       ${g.dice ? `<p>Dés : <b>${g.dice.join(' + ')} = ${g.dice.reduce((x, y) => x + y, 0)}</b></p>` : ''}
       ${mePlayer.eliminated ? '<p class="muted">Tu es éliminé : tu continues à montrer tes cartes quand on te le demande.</p>' : ''}`;
   } else {
+    const total = g.dice ? g.dice.reduce((x, y) => x + y, 0) : 0;
     controls = `
       <div class="row">
-        <button class="primary" id="roll" ${a.roll ? '' : 'disabled'}>Lancer les dés</button>
-        ${a.secretPassage ? `<button id="passage">Passage secret → ${getCard(a.secretPassage).name}</button>` : ''}
-        <button id="end" ${a.endTurn ? '' : 'disabled'}>Finir mon tour</button>
+        ${a.roll ? `<button class="primary big" id="roll">🎲 Lancer les dés</button>` : ''}
+        ${a.secretPassage ? `<button id="passage">🕳️ Passage secret → ${getCard(a.secretPassage).name}</button>` : ''}
+        ${a.endTurn ? `<button id="end">Finir mon tour</button>` : ''}
       </div>
-      ${g.dice ? `<p>Dés : <b>${g.dice.join(' + ')} = ${g.dice.reduce((x, y) => x + y, 0)}</b>${a.move ? ' : touche une case verte ou une pièce encadrée.' : ''}</p>` : ''}
+      ${g.dice ? `<p>Dés : <b>${g.dice.join(' + ')} = ${total}</b>${a.move ? ` · tu peux avancer de <b>1 à ${total}</b> cases : touche une case verte ou une pièce avec une flèche.` : ''}</p>` : ''}
       ${a.suggest ? `
-        <div class="panel"><h2>Hypothèse dans : ${getCard(myRoom!).name}</h2>
-          <div class="row"><select id="sSus">${opts(SUSPECTS)}</select><select id="sWea">${opts(WEAPONS)}</select>
-          <button class="primary" id="suggest">Proposer</button></div></div>` : ''}
+        <div class="panel inner"><h2>Hypothèse dans : ${getCard(myRoom!).name}</h2>
+          <p class="muted">Choisis un suspect et une arme :</p>
+          ${picker(SUSPECTS, 'sSus')}
+          ${picker(WEAPONS, 'sWea')}
+          <div class="row"><button class="primary" id="suggest" ${ui.sSus && ui.sWea ? '' : 'disabled'}>Proposer l'hypothèse</button></div>
+        </div>` : ''}
       ${a.accuse ? `
-        <details class="panel"><summary>Accusation finale</summary>
-          <p class="muted">Si tu te trompes, tu es éliminé.</p>
-          <div class="row"><select id="aSus">${opts(SUSPECTS)}</select><select id="aWea">${opts(WEAPONS)}</select><select id="aRoo">${opts(ROOMS)}</select>
-          <button class="danger" id="accuse">Accuser</button></div></details>` : ''}`;
+        <details class="panel inner" id="accuse-box" ${ui.accuseOpen ? 'open' : ''}><summary>⚖️ Accusation finale</summary>
+          <p class="muted">Tu penses avoir trouvé ? Si tu te trompes, tu es éliminé.</p>
+          ${picker(SUSPECTS, 'aSus')}${picker(WEAPONS, 'aWea')}${picker(ROOMS, 'aRoo')}
+          <div class="row"><button class="danger" id="accuse" ${ui.aSus && ui.aWea && ui.aRoo ? '' : 'disabled'}>Accuser</button></div></details>` : ''}`;
   }
 
   const board = ensureLayout(el);
   const side = el.querySelector<HTMLElement>('#gv-side')!;
   el.querySelector<HTMLElement>('#gv-top')!.innerHTML = o.banner ?? '';
 
-  // On garde l'état du panneau « Accusation » entre deux affichages
-  const accuseOpen = (side.querySelector('details.panel') as HTMLDetailsElement | null)?.open ?? false;
-
+  const nbKey = notebookKey(me, myHand);
+  const nb = loadNotebook(nbKey);
+  const tabBtn = (id: UiState['tab'], label: string, badge = false) =>
+    `<button class="gv-tab ${ui!.tab === id ? 'active' : ''}" data-tab="${id}">${label}${badge ? '<span class="dot"></span>' : ''}</button>`;
+  side.className = `tab-${ui.tab}`;
   side.innerHTML = `
-        <div class="panel">
-          <h2>${g.phase === 'finished' ? 'Fin de partie' : `Tour ${g.turn} : ${nameOf(g, waitingFor, me)}`}</h2>
-          ${controls}
-          <div class="error">${esc(o.error ?? '')}</div>
-          ${a.abandon && g.phase !== 'finished' ? `<div class="row"><button class="danger" id="abandon">Abandonner la partie (maître de jeu)</button></div>` : ''}
-        </div>
-        <div class="panel"><h2>Mes cartes</h2>
-          <div class="cards">${(mePlayer.hand ?? []).map((c) => `<div class="card ${getCard(c).kind}">${getCard(c).name}</div>`).join('')}</div>
-        </div>
-        <div class="panel"><h2>Joueurs</h2>
-          ${v.players.map((p) => `<div class="row" style="margin:2px 0">${nameOf(v, p.id, me)}
-            <span class="muted">${p.handSize} cartes${p.id === g.hostId ? ' · maître de jeu' : ''}${p.eliminated ? ' · éliminé' : ''}</span></div>`).join('')}
-        </div>
-        <div class="panel"><h2>Journal</h2><div class="log">${[...v.log].reverse().map((e) => `<div>${logLine(v, e)}</div>`).join('')}</div></div>
-        <div class="panel"><h2>Carnet d'enquête</h2>${renderNotebook(me, v)}</div>`;
-
-  const details = side.querySelector('details.panel') as HTMLDetailsElement | null;
-  if (details && accuseOpen) details.open = true;
+    <nav class="gv-tabs">${tabBtn('action', 'Jeu', myMove)}${tabBtn('cards', 'Cartes')}${tabBtn('notebook', 'Carnet')}${tabBtn('log', 'Journal')}</nav>
+    <section class="panel" data-sec="action">
+      <h2>${g.phase === 'finished' ? 'Fin de partie' : `Tour ${g.turn} : ${nameOf(g, waitingFor, me)}`}</h2>
+      ${controls}
+      <div class="error">${esc(o.error ?? '')}</div>
+      ${a.abandon && g.phase !== 'finished' ? `<div class="row"><button class="danger small" id="abandon">Abandonner la partie (maître de jeu)</button></div>` : ''}
+    </section>
+    <section class="panel" data-sec="cards"><h2>Mes cartes</h2>
+      <div class="card-row hand">${myHand.map((c) => cardHTML(c, { size: 'md' })).join('')}</div>
+      <p class="muted">Ces cartes ne sont pas dans l'enveloppe : leurs suspects, armes et pièces sont innocents.</p>
+    </section>
+    <section class="panel" data-sec="notebook"><h2>Carnet d'enquête</h2>${renderNotebook(me, v, nb)}</section>
+    <section class="panel" data-sec="log"><h2>Joueurs</h2>
+      ${v.players.map((p) => `<div class="row" style="margin:2px 0">${nameOf(v, p.id, me)}
+        <span class="muted">${p.handSize} cartes${p.id === g.hostId ? ' · maître de jeu' : ''}${p.eliminated ? ' · éliminé' : ''}</span></div>`).join('')}
+      <h2 style="margin-top:12px">Journal</h2><div class="log">${[...v.log].reverse().map((e) => `<div>${logLine(v, e)}</div>`).join('')}</div>
+    </section>`;
 
   board.update({
     state: g,
@@ -256,35 +331,98 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
     onPick: (dest) => o.act({ type: 'move', player: me, to: dest.to }),
   });
 
+  // Révélations : carte qu'on vient de me montrer, ou personne n'a pu répondre
+  const fresh = v.log.slice(ui.seen[me]);
+  ui.seen[me] = v.log.length;
+  for (const e of fresh) {
+    if (e.type === 'cardShown' && e.to === me && e.card) showReveal(el, `${nameOf(v, e.player, me)} te montre :`, e.card);
+    else if (e.type === 'cardShown' && e.player === me && e.card) toast(el, `Tu as montré « ${getCard(e.card).name} » à ${nameOf(v, e.to, me)}.`);
+    else if (e.type === 'noOneRefuted' && e.player === me) showReveal(el, 'Personne n’a pu répondre à ton hypothèse !', null);
+  }
+
+  // Événements
   const on = (id: string, fn: () => void) => side.querySelector(`#${id}`)?.addEventListener('click', fn);
-  const val = (id: string) => (side.querySelector(`#${id}`) as HTMLSelectElement).value as never;
+  side.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) =>
+    b.addEventListener('click', () => {
+      ui!.tab = b.dataset.tab as UiState['tab'];
+      renderGame(el, o);
+    }),
+  );
+  side.querySelectorAll<HTMLElement>('[data-pick]').forEach((c) =>
+    c.addEventListener('click', () => {
+      ui![c.dataset.pick as 'sSus'] = c.dataset.id;
+      renderGame(el, o);
+    }),
+  );
+  side.querySelector<HTMLDetailsElement>('#accuse-box')?.addEventListener('toggle', (e) => {
+    ui!.accuseOpen = (e.target as HTMLDetailsElement).open;
+  });
   on('exit', () => o.onExit?.run());
   on('roll', () => o.act({ type: 'roll', player: me }));
   on('passage', () => o.act({ type: 'secretPassage', player: me }));
   on('end', () => o.act({ type: 'endTurn', player: me }));
-  on('suggest', () => o.act({ type: 'suggest', player: me, suspect: val('sSus'), weapon: val('sWea') }));
-  on('accuse', () => o.act({ type: 'accuse', player: me, suspect: val('aSus'), weapon: val('aWea'), room: val('aRoo') }));
+  on('suggest', () => {
+    const { sSus, sWea } = ui!;
+    if (!sSus || !sWea) return;
+    ui!.sSus = ui!.sWea = undefined;
+    o.act({ type: 'suggest', player: me, suspect: sSus as never, weapon: sWea as never });
+  });
+  on('accuse', () => {
+    if (!confirmInline(side, 'accuse', 'Sûr ? Touche encore pour accuser')) return;
+    const { aSus, aWea, aRoo } = ui!;
+    ui!.accuseOpen = false;
+    o.act({ type: 'accuse', player: me, suspect: aSus as never, weapon: aWea as never, room: aRoo as never });
+  });
   on('abandon', () => {
-    if (confirmInline(side, 'abandon')) o.act({ type: 'abandon', player: me });
+    if (confirmInline(side, 'abandon', 'Confirmer l’abandon ?')) o.act({ type: 'abandon', player: me });
   });
   side.querySelectorAll<HTMLElement>('[data-show]').forEach((b) =>
     b.addEventListener('click', () => o.act({ type: 'showCard', player: me, card: b.dataset.show as CardId })),
   );
-  side.querySelectorAll<HTMLElement>('[data-mark]').forEach((td) =>
+  side.querySelectorAll<HTMLElement>('[data-nb]').forEach((td) =>
     td.addEventListener('click', () => {
-      const nb = notebooks.get(me)!;
       const cur = MARKS.indexOf(td.textContent ?? '');
-      nb[td.dataset.mark!] = MARKS[(cur + 1) % MARKS.length];
-      td.textContent = nb[td.dataset.mark!];
+      const next = MARKS[(cur + 1) % MARKS.length];
+      nb[td.dataset.nb!] = next;
+      saveNotebook(nbKey, nb);
+      td.textContent = next;
+      td.className = `nb-cell ${td.classList.contains('status') ? 'status' : ''} ${next === '✓' ? 'yes' : next === '✗' ? 'no' : next === '?' ? 'maybe' : ''}`;
     }),
   );
 }
 
+/** Grande carte qui se retourne au milieu de l'écran (visible seulement par celui qui la reçoit). */
+function showReveal(el: HTMLElement, title: string, card: CardId | null) {
+  const ov = document.createElement('div');
+  ov.className = 'reveal';
+  ov.innerHTML = `<div class="reveal-box">
+    <p class="reveal-title">${title}</p>
+    ${card ? `<div class="flip"><div class="flip-inner"><div class="flip-face back">${cardBackHTML('lg')}</div><div class="flip-face front">${cardHTML(card, { size: 'lg' })}</div></div></div>
+      <p class="muted">Pense à la cocher dans ton carnet (c'est fait automatiquement 😉).</p>`
+    : '<div class="reveal-none">🤫</div><p class="muted">Aucun joueur n’a ces cartes… sauf peut-être toi !</p>'}
+    <button class="primary" id="reveal-ok">OK</button></div>`;
+  el.appendChild(ov);
+  requestAnimationFrame(() => setTimeout(() => ov.classList.add('flipped'), 500));
+  ov.querySelector('#reveal-ok')!.addEventListener('click', () => ov.remove());
+}
+
+function toast(el: HTMLElement, html: string) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = html;
+  el.appendChild(t);
+  setTimeout(() => t.classList.add('show'), 20);
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 400);
+  }, 3200);
+}
+
 /** Demande une confirmation sans boîte de dialogue : il faut cliquer deux fois. */
-function confirmInline(el: HTMLElement, id: string): boolean {
+function confirmInline(el: HTMLElement, id: string, label: string): boolean {
   const btn = el.querySelector<HTMLButtonElement>(`#${id}`)!;
   if (btn.dataset.armed) return true;
   btn.dataset.armed = '1';
-  btn.textContent = 'Confirmer l’abandon ?';
+  btn.textContent = label;
   return false;
 }

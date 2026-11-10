@@ -1,6 +1,7 @@
 // Point d'entrée : petite navigation par l'adresse (#/ accueil, #/test mode test, #/p/CODE partie en ligne).
 
 import './style.css';
+import './pwa';
 import { renderHome, startOnline } from './screens/online';
 import { startLocal } from './screens/local';
 import { destroyGameView } from './games/cluedo/ui/gameView';

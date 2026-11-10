@@ -143,3 +143,81 @@ button.danger { border-color: var(--danger); color: #ffb4b1; }
 .set-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: 8px 0; }
 .set-row > span { width: 100%; font-size: 0.82rem; color: var(--muted); }
 .opt { font-size: 0.9rem; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+/* ---------- Cartes illustrées ---------- */
+.gcard {
+  --band: #8a8f99; position: relative; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;
+  background: #f5eedc; color: #2a2018; border-radius: 10px; border: 3px solid var(--band);
+  box-shadow: 0 3px 10px #0007; overflow: hidden; user-select: none; transition: transform .15s, box-shadow .15s;
+}
+.gcard.suspect { --band: #a8322b; }
+.gcard.weapon { --band: #2e6cb0; }
+.gcard.room { --band: #2f8a4a; }
+.gcard.sm { width: 64px; height: 92px; font-size: 10px; border-width: 2px; border-radius: 8px; }
+.gcard.md { width: 92px; height: 132px; font-size: 12px; }
+.gcard.lg { width: 130px; height: 186px; font-size: 15px; }
+.gcard-band { width: 100%; background: var(--band); color: #fff; text-align: center; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 3px 0; font-size: .85em; }
+.card-art { flex: 1; width: 78%; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.room-icon { font-size: 2.6em; }
+.gcard-name { font-family: Georgia, serif; font-weight: 700; text-align: center; padding: 2px 4px 6px; line-height: 1.1; font-size: 1.05em; }
+.gcard-note { position: absolute; top: 22%; right: -22px; transform: rotate(35deg); background: #c9a24a; color: #1b1d24; font-size: .7em; font-weight: 700; padding: 1px 22px; }
+.gcard[data-pick], .gcard[data-show] { cursor: pointer; }
+.gcard[data-pick]:hover, .gcard[data-show]:hover { transform: translateY(-4px); box-shadow: 0 8px 18px #000a; }
+.gcard.selected { transform: translateY(-6px); box-shadow: 0 0 0 3px var(--accent), 0 8px 18px #000a; }
+.gcard[data-show] { animation: card-glow 1.4s infinite; }
+@keyframes card-glow { 50% { box-shadow: 0 0 0 4px #ffd36b, 0 8px 18px #000a; } }
+.gcard.back { background: #3b1f2b; border-color: #c9a24a; align-items: center; justify-content: center; }
+.gcard-back-mark { color: #c9a24a; font: 700 4em Georgia, serif; }
+.card-row { display: flex; gap: 6px; overflow-x: auto; padding: 8px 2px 10px; scrollbar-width: thin; }
+.card-row.center { justify-content: center; flex-wrap: wrap; overflow: visible; }
+.card-row.hand { flex-wrap: wrap; }
+.callout { background: #3a2f17; border: 1px solid #6b5521; border-radius: 8px; padding: 8px 10px; }
+.panel.inner { background: #1f222b; margin: 10px 0 4px; }
+button.big { font-size: 1.1rem; padding: 12px 18px; }
+button.small { font-size: .82rem; padding: 6px 10px; }
+
+/* ---------- Révélation d'une carte ---------- */
+.reveal { position: fixed; inset: 0; z-index: 50; background: #0009; display: flex; align-items: center; justify-content: center; padding: 16px; animation: fade-in .2s; }
+@keyframes fade-in { from { opacity: 0; } }
+.reveal-box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; text-align: center; max-width: 360px; width: 100%; }
+.reveal-title { font-size: 1.1rem; margin: 0 0 14px; }
+.reveal-none { font-size: 4rem; }
+.flip { perspective: 900px; width: 130px; height: 186px; margin: 0 auto 10px; }
+.flip-inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .7s cubic-bezier(.3,1.4,.5,1); }
+.reveal.flipped .flip-inner { transform: rotateY(180deg); }
+.flip-face { position: absolute; inset: 0; backface-visibility: hidden; }
+.flip-face.front { transform: rotateY(180deg); }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 40px); opacity: 0; z-index: 40; background: #263d26; border: 1px solid #3f6b3f; border-radius: 10px; padding: 10px 14px; transition: all .35s; max-width: calc(100% - 32px); }
+.toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+/* ---------- Carnet en grille ---------- */
+.nb-wrap { overflow-x: auto; }
+.notebook.grid { border-collapse: collapse; width: 100%; font-size: .82rem; }
+.notebook.grid th { font-weight: 600; color: var(--muted); padding: 4px 2px; white-space: nowrap; font-size: .75rem; }
+.notebook.grid td { border-bottom: 1px solid var(--line); padding: 0; }
+.notebook.grid .nb-name { padding: 4px 6px 4px 2px; white-space: nowrap; }
+.notebook.grid tr.mine .nb-name { color: var(--muted); text-decoration: line-through; }
+.nb-cell { width: 34px; min-width: 30px; height: 28px; text-align: center; cursor: pointer; font-weight: 700; user-select: none; border-left: 1px solid var(--line); }
+.nb-cell.status { background: #ffffff08; }
+.nb-cell.yes { color: #7dff7d; }
+.nb-cell.no { color: #ff8a8a; }
+.nb-cell.maybe { color: #ffd36b; }
+.nb-cell.auto { opacity: .55; }
+
+/* ---------- Onglets (téléphone) ---------- */
+.gv-tabs { display: none; }
+@media (max-width: 860px) {
+  .gv-tabs { display: flex; position: sticky; top: 0; z-index: 6; gap: 4px; background: var(--bg); padding: 8px 0; }
+  .gv-tab { flex: 1; padding: 9px 4px; font-size: .9rem; position: relative; }
+  .gv-tab.active { background: var(--accent); color: #1b1d24; border-color: var(--accent); font-weight: 700; }
+  .gv-tab .dot { position: absolute; top: 5px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #ff5c5c; }
+  #gv-side > section { display: none; }
+  #gv-side.tab-action > [data-sec="action"], #gv-side.tab-cards > [data-sec="cards"],
+  #gv-side.tab-notebook > [data-sec="notebook"], #gv-side.tab-log > [data-sec="log"] { display: block; }
+  .board-wrap { height: 52vh; }
+}
+
+/* Appli installée (iPhone : barre d'état transparente) */
+#app { padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(40px, env(safe-area-inset-bottom)); }
+.install { border-color: #6b5521; background: #2a2416; }
+.install ol { margin: 6px 0 0; padding-left: 20px; }
