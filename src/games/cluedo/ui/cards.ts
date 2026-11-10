@@ -5,6 +5,7 @@
 //  - en bas, une plaque dorée avec le nom.
 
 import { SUSPECTS, getCard, type CardId } from '../engine';
+import { customImages } from './customImages';
 
 const KIND_LABEL = { suspect: 'Suspect', weapon: 'Arme', room: 'Pièce' } as const;
 
@@ -210,6 +211,8 @@ export function cardHTML(id: CardId, o: CardOptions = {}): string {
     plate = `<span class="gc-title">${s.title}</span><span class="gc-surname">${s.surname}</span>`;
   } else if (c.kind === 'weapon') art = weaponArt(id);
   else art = roomArt(id);
+  const photo = customImages.get(id);
+  if (photo) art = `<img class="gc-photo" src="${photo}" alt="">`;
   const cls = ['gcard', c.kind, o.size ?? 'md', o.selected ? 'selected' : '', o.dim ? 'dim' : ''].join(' ');
   return `<div class="${cls}" ${o.attrs ?? ''}>
     <div class="gc-type">❦ ${KIND_LABEL[c.kind]} ❦</div>
@@ -232,7 +235,10 @@ export function cardSVG(id: CardId): string {
   const c = getCard(id);
   const s = c.kind === 'suspect' ? SUSPECTS.find((x) => x.id === id)! : null;
   const art = s ? suspectArt(id, s.color) : c.kind === 'weapon' ? weaponArt(id) : roomArt(id);
-  const inner = art.replace('<svg viewBox="0 0 100 120" class="gc-art">', '<svg x="38" y="62" width="180" height="216" viewBox="0 0 100 120">');
+  const photo = customImages.get(id);
+  const inner = photo
+    ? `<clipPath id="ph"><rect x="26" y="54" width="204" height="222" rx="8"/></clipPath><image href="${photo}" x="26" y="54" width="204" height="222" preserveAspectRatio="xMidYMid slice" clip-path="url(#ph)"/><rect x="26" y="54" width="204" height="222" rx="8" fill="none" stroke="#c9a24a" stroke-width="4"/>`
+    : art.replace('<svg viewBox="0 0 100 120" class="gc-art">', '<svg x="38" y="62" width="180" height="216" viewBox="0 0 100 120">');
   const serif = `font-family="'Playfair Display', Georgia, serif"`;
   const surname = s ? s.surname : c.name;
   const fs = surname.length > 12 ? 24 : 30;
@@ -254,5 +260,7 @@ export function cardSVG(id: CardId): string {
 /** Portrait seul (médaillon), pour la barre des joueurs et les annonces. */
 export function portraitHTML(id: CardId): string {
   const s = SUSPECTS.find((x) => x.id === id);
+  const photo = customImages.get(id);
+  if (s && photo) return `<img class="portrait photo" src="${photo}" alt="" style="border-color:${s.color}">`;
   return s ? suspectArt(id, s.color).replace('class="gc-art"', 'class="portrait"') : '';
 }

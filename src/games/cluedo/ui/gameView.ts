@@ -10,6 +10,7 @@ import { Board3DView } from '../board3d/Board3DView';
 import { loadSettings, saveSettings, webglAvailable, type DisplaySettings } from './settings';
 import { cardBackHTML, cardHTML, portraitHTML } from './cards';
 import { ICONS } from './icons';
+import { customImages, loadCustomImages, onCustomImagesChange, removeCustomImage, setCustomImage } from './customImages';
 import {
   ROOMS,
   SUSPECTS,
@@ -140,7 +141,7 @@ interface BoardLike {
   onEvent: ((e: BoardEvent) => void) | null;
 }
 
-type SheetId = 'cards' | 'notebook' | 'log' | 'suggest' | 'accuse' | 'refute' | 'menu' | 'end';
+type SheetId = 'cards' | 'notebook' | 'log' | 'suggest' | 'accuse' | 'refute' | 'menu' | 'end' | 'images';
 
 /** État de l'interface qui doit survivre aux réaffichages. */
 interface UiState {
@@ -217,6 +218,10 @@ function ensureLayout(el: HTMLElement): BoardLike {
   boards.set(el, board);
   el.querySelector('#recenter')!.addEventListener('click', () => board.recenter());
   setupSettings(el, settings, use3d);
+  // Mes images : chargées au démarrage, et la partie se réaffiche quand elles changent
+  void loadCustomImages();
+  imageUnsub.get(el)?.();
+  imageUnsub.set(el, onCustomImagesChange(() => rerender(el)));
 
   // Ouverture / fermeture des volets
   el.querySelectorAll<HTMLElement>('[data-open]').forEach((b) =>
@@ -276,8 +281,12 @@ function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
   });
 }
 
+const imageUnsub = new WeakMap<HTMLElement, () => void>();
+
 /** À appeler en quittant l'écran de partie : libère le plateau. */
 export function destroyGameView(el: HTMLElement) {
+  imageUnsub.get(el)?.();
+  imageUnsub.delete(el);
   boards.get(el)?.destroy();
   boards.delete(el);
   document.body.classList.remove('in-game');
@@ -571,9 +580,24 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
         <div class="menu-list">
           ${o.onHome ? `<button id="go-home">← Retour à l'accueil</button>` : ''}
           <button id="open-settings">⚙ Réglages d'affichage</button>
+          <button id="open-images">🖼 Mes images pour les cartes</button>
           ${a.abandon && g.phase !== 'finished' ? `<button class="danger" id="abandon">Abandonner la partie (maître de jeu)</button>` : ''}
         </div>`;
       break;
+    case 'images': {
+      const group = (title: string, list: readonly { id: string }[]) =>
+        `<h3 class="img-kind">${title}</h3><div class="img-grid">${list
+          .map(
+            (c) => `<div class="img-slot">${cardHTML(c.id as CardId, { size: 'md', attrs: `data-img="${c.id}"` })}
+              ${customImages.has(c.id) ? `<button data-img-del="${c.id}">Remettre le dessin</button>` : '<span class="muted" style="font-size:12px">Touche pour une photo</span>'}</div>`,
+          )
+          .join('')}</div>`;
+      content = `<h2>Mes images</h2>
+        <p class="muted">Touche une carte pour choisir une photo (par exemple celles de ta boîte de jeu). Les photos restent sur cet appareil : elles ne sont envoyées nulle part, et les autres joueurs voient leurs propres images.</p>
+        <input type="file" accept="image/*" id="img-file" hidden>
+        ${group('Suspects', SUSPECTS)}${group('Armes', WEAPONS)}${group('Pièces', ROOMS)}`;
+      break;
+    }
     default:
       content = '';
   }
@@ -615,6 +639,28 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
     renderGame(el, o);
     el.querySelector<HTMLElement>('#settings-panel')!.hidden = false;
   });
+  on(body, 'open-images', () => {
+    ui!.sheet = 'images';
+    renderGame(el, o);
+  });
+  if (ui.sheet === 'images') {
+    const input = body.querySelector<HTMLInputElement>('#img-file')!;
+    let target = '';
+    body.querySelectorAll<HTMLElement>('[data-img]').forEach((c) =>
+      c.addEventListener('click', () => {
+        target = c.dataset.img!;
+        input.value = '';
+        input.click();
+      }),
+    );
+    input.addEventListener('change', () => {
+      const f = input.files?.[0];
+      if (f && target) setCustomImage(target as CardId, f).catch(() => toast(el, 'Impossible de lire cette image.'));
+    });
+    body.querySelectorAll<HTMLElement>('[data-img-del]').forEach((b) =>
+      b.addEventListener('click', () => void removeCustomImage(b.dataset.imgDel as CardId)),
+    );
+  }
   on(body, 'abandon', () => {
     if (confirmInline(body, 'abandon', 'Confirmer l’abandon ?')) o.act({ type: 'abandon', player: me });
   });

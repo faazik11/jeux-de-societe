@@ -372,3 +372,13 @@ button.pill.danger { background: linear-gradient(180deg, var(--velvet-light), va
   .hud-btn.labeled { width: 66px; height: 66px; font-size: 12px; }
   .dice-btn { width: 110px; height: 110px; }
 }
+
+/* ---------- Mes images (photos du joueur) ---------- */
+.gc-photo { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; box-shadow: 0 0 0 2px #c9a24a, 0 0 0 3px #6b4a1a, 0 2px 4px #0008; }
+.gcard .gc-pic:has(.gc-photo) { padding: 4% 7% 3%; }
+.portrait.photo { object-fit: cover; border-radius: 50%; border: 2px solid; box-sizing: border-box; }
+.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; justify-items: center; margin: 8px 0 14px; }
+.img-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.img-slot .gcard { cursor: pointer; }
+.img-slot button { font-size: 12px; padding: 3px 10px; }
+.img-kind { margin: 10px 0 0; font-family: var(--font-title); color: var(--accent-light); }
