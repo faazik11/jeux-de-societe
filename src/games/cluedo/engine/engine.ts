@@ -100,7 +100,7 @@ export function createGame(opts: CreateGameOptions): GameState {
 
   return {
     version: 1,
-    config: { diceCount: 2, ...opts.config },
+    config: { diceCount: 2, exactMove: false, ...opts.config },
     rng: rng.state,
     hostId,
     players: playerStates,
@@ -155,7 +155,7 @@ export function getDestinations(state: GameState): Destination[] {
   const player = getPlayer(state, state.currentPlayer);
   const total = state.dice.reduce((a, b) => a + b, 0);
   const from = state.pawns[player.suspect];
-  return [...reachableDestinations(from, total, blockedCells(state, player.suspect)).values()];
+  return [...reachableDestinations(from, total, blockedCells(state, player.suspect), !!state.config.exactMove).values()];
 }
 
 function canSuggestNow(state: GameState, id: string): boolean {

@@ -56,6 +56,8 @@ export type LogEntry =
 export interface GameConfig {
   /** Nombre de dés lancés (2 par défaut, car le plateau est grand). */
   diceCount: number;
+  /** Vrai = il faut avancer d'exactement le total des dés (règle stricte). Faux (par défaut) = de 1 à N cases. */
+  exactMove?: boolean;
 }
 
 export interface GameState {

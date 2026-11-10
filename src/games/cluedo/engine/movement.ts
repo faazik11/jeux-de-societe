@@ -1,5 +1,5 @@
 // Calcul des déplacements possibles.
-// Règles : on avance d'exactement N cases (N = total des dés), orthogonalement,
+// Règles : on avance de 1 à N cases (N = total des dés) — ou d'exactement N en règle stricte —, orthogonalement,
 // sans repasser par la même case et sans traverser une case occupée par un autre pion.
 // Entrer dans une pièce (par une porte) arrête le déplacement, même s'il reste des points.
 // Sortir d'une pièce par une de ses portes compte comme un pas.
@@ -50,7 +50,13 @@ export interface Destination {
  * (ou moins si l'on entre dans une pièce).
  * @param blocked cases de couloir occupées par d'autres pions
  */
-export function reachableDestinations(from: Position, steps: number, blocked: Set<string>): Map<string, Destination> {
+export function reachableDestinations(
+  from: Position,
+  steps: number,
+  blocked: Set<string>,
+  /** Vrai = il faut utiliser tous les points (règle stricte) ; faux = de 1 à N cases. */
+  exact = false,
+): Map<string, Destination> {
   const result = new Map<string, Destination>();
   const startRoom: RoomId | null = from.type === 'room' ? from.room : null;
   const visited = new Set<string>([posKey(from)]);
@@ -76,10 +82,12 @@ export function reachableDestinations(from: Position, steps: number, blocked: Se
 
       if (blocked.has(key)) continue;
 
-      if (remaining === 1) {
-        if (!result.has(key)) result.set(key, { to: next, path: [...path, next] });
-        continue;
+      // Règle souple : on peut s'arrêter sur n'importe quelle case du chemin
+      if (!exact || remaining === 1) {
+        const prev = result.get(key);
+        if (!prev || prev.path.length > path.length + 1) result.set(key, { to: next, path: [...path, next] });
       }
+      if (remaining === 1) continue;
 
       const memoKey = `${key}|${remaining - 1}|${visitedSignature(visited, next, remaining - 1)}`;
       if (explored.has(memoKey)) continue;

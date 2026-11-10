@@ -53,9 +53,23 @@ describe('mise en place', () => {
 });
 
 describe('déplacements', () => {
-  it('atteint des cases à exactement N pas', () => {
-    const d = reachableDestinations({ type: 'cell', x: 0, y: 17 }, 1, new Set());
-    expect([...d.keys()].sort()).toEqual(['0,16', '0,18', '1,17'].sort());
+  it('atteint des cases à exactement N pas (règle stricte)', () => {
+    const d = reachableDestinations({ type: 'cell', x: 0, y: 17 }, 2, new Set(), true);
+    expect(d.has('1,17')).toBe(false); // à 1 pas : interdit en règle stricte
+    expect(d.has('2,17')).toBe(true);
+  });
+
+  it('règle souple (par défaut) : on peut avancer de 1 à N cases', () => {
+    const d = reachableDestinations({ type: 'cell', x: 0, y: 17 }, 2, new Set());
+    expect(d.has('1,17')).toBe(true); // 1 pas
+    expect(d.has('2,17')).toBe(true); // 2 pas
+    expect(d.has('3,17')).toBe(false); // 3 pas : trop loin
+    expect(d.get('1,17')!.path).toHaveLength(2);
+  });
+
+  it('la règle souple est celle par défaut, la stricte reste disponible en option', () => {
+    expect(newGame().config.exactMove).toBe(false);
+    expect(createGame({ players: FOUR, config: { exactMove: true } }).config.exactMove).toBe(true);
   });
 
   it('entrer dans une pièce arrête le déplacement, même avec des points en trop', () => {
