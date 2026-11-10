@@ -1,4 +1,8 @@
-// Écran de partie : plateau (3D ou 2.5D) + panneau de jeu (actions, cartes, carnet, journal).
+// Écran de partie, façon jeu vidéo (Mario Party) :
+//  - le plateau occupe tout l'écran ;
+//  - par-dessus : la barre des joueurs en haut, les annonces au milieu (« Tour 3 », « Tour de Rayan »,
+//    résultat des dés, hypothèses…), les boutons d'action en bas (gros bouton dé) ;
+//  - cartes, carnet, journal, hypothèse, accusation et menu s'ouvrent dans des volets qui montent du bas.
 // Utilisé à la fois par le mode test local et par le jeu en ligne.
 
 import { IsoBoard, type BoardUpdate } from '../board3d/IsoBoard';
@@ -34,6 +38,8 @@ export interface GameViewOptions {
   pausedBy?: string[];
   /** Bouton « nouvelle partie » / « retour » en fin de partie. */
   onExit?: { label: string; run: () => void };
+  /** Retour à l'accueil (bouton du menu). */
+  onHome?: () => void;
 }
 
 const MARKS = ['', '✗', '✓', '?'];
@@ -124,31 +130,44 @@ function renderNotebook(me: string, v: PlayerView, nb: Notebook): string {
     <p class="muted">Touche une case pour changer : ✗ ne l'a pas / innocent · ✓ l'a / coupable · ? doute. Les cases en gris sont remplies automatiquement.</p>`;
 }
 
+type BoardEvent = { type: 'dice'; total: number; player: string } | { type: 'ready' };
+
 interface BoardLike {
   update(u: BoardUpdate): void;
   recenter(): void;
   destroy(): void;
+  onEvent: ((e: BoardEvent) => void) | null;
 }
 
-const boards = new WeakMap<HTMLElement, BoardLike>();
-const lastOptions = new WeakMap<HTMLElement, GameViewOptions>();
+type SheetId = 'cards' | 'notebook' | 'log' | 'suggest' | 'accuse' | 'refute' | 'menu' | 'end';
 
-/** État de l'interface qui doit survivre aux réaffichages (onglet, cartes choisies, journal déjà vu). */
+/** État de l'interface qui doit survivre aux réaffichages. */
 interface UiState {
-  tab: 'action' | 'cards' | 'notebook' | 'log';
+  sheet: SheetId | null;
   sSus?: string;
   sWea?: string;
   aSus?: string;
   aWea?: string;
   aRoo?: string;
-  accuseOpen: boolean;
-  /** Longueur du journal déjà vue, par joueur (pour ne montrer chaque révélation qu'une fois). */
+  /** Longueur du journal déjà vue, par joueur (pour n'annoncer chaque événement qu'une fois). */
   seen: Record<string, number>;
   me: string;
+  /** Dernier tour annoncé (pour « Tour de X »). */
+  announcedTurn: number;
+  /** File des annonces au milieu de l'écran. */
+  queue: { html: string; ms: number; cls?: string }[];
+  showing: boolean;
+  lastError?: string;
 }
+
+/** Plateaux prêts (les annonces attendent que le plateau soit affiché). */
+const boardReady = new WeakSet<HTMLElement>();
+
+const boards = new WeakMap<HTMLElement, BoardLike>();
+const lastOptions = new WeakMap<HTMLElement, GameViewOptions>();
 const uiStates = new WeakMap<HTMLElement, UiState>();
 
-/** Crée la structure de l'écran (une seule fois) et le plateau (3D ou 2.5D selon les réglages). */
+/** Crée la scène (une seule fois) : plateau plein écran + calques d'interface. */
 function ensureLayout(el: HTMLElement): BoardLike {
   const existing = boards.get(el);
   if (existing && el.querySelector('#board-host')) return existing;
@@ -156,29 +175,72 @@ function ensureLayout(el: HTMLElement): BoardLike {
   const settings = loadSettings();
   const use3d = settings.board === '3d' && webglAvailable();
   el.innerHTML = `
-    <div id="gv-top"></div>
-    <div class="layout">
-      <div class="board-wrap">
-        <div id="board-host"></div>
-        <button class="board-btn" id="recenter" title="Recentrer la caméra">⤢</button>
-        <button class="board-btn" id="settings-btn" title="Réglages" style="top:58px">⚙</button>
-        <div class="cam-hint" id="cam-hint">Caméra libre · touche ⤢ pour recentrer</div>
-        <div class="settings-panel" id="settings-panel" hidden></div>
+    <div class="stage">
+      <div id="board-host"></div>
+      <div class="hud-top">
+        <button class="hud-btn" data-open="menu" title="Menu">☰</button>
+        <div class="players-strip" id="players"></div>
+        <button class="hud-btn" id="recenter" title="Recentrer la caméra">⤢</button>
       </div>
-      <div id="gv-side"></div>
+      <div class="hud-status" id="status"></div>
+      <div class="cam-hint" id="cam-hint">Caméra libre · touche ⤢ pour recentrer</div>
+      <div class="announce-layer" id="announce"></div>
+      <div class="hud-bottom">
+        <div class="hud-side">
+          <button class="hud-btn labeled" data-open="cards"><span>🃏</span>Cartes</button>
+          <button class="hud-btn labeled" data-open="notebook"><span>📒</span>Carnet</button>
+        </div>
+        <div class="hud-actions" id="actions"></div>
+        <div class="hud-side right">
+          <button class="hud-btn labeled" data-open="log"><span>📜</span>Journal</button>
+        </div>
+      </div>
+      <div class="sheet-backdrop" id="sheet-backdrop"></div>
+      <div class="sheet" id="sheet"><div class="sheet-handle"></div><button class="sheet-close" id="sheet-close">✕</button><div class="sheet-body" id="sheet-body"></div></div>
+      <div class="settings-panel" id="settings-panel" hidden></div>
     </div>`;
+  document.body.classList.add('in-game');
   const host = el.querySelector<HTMLElement>('#board-host')!;
   const hint = el.querySelector<HTMLElement>('#cam-hint')!;
   const board: BoardLike = use3d
     ? Board3DView.create(host, settings, (user) => hint.classList.toggle('show', user))
     : IsoBoard.create(host);
+  board.onEvent = (e) => onBoardEvent(el, e);
+  boardReady.delete(el);
+  // Sécurité : si le plateau ne prévient pas, on démarre quand même les annonces
+  setTimeout(() => onBoardEvent(el, { type: 'ready' }), 6000);
   boards.set(el, board);
   el.querySelector('#recenter')!.addEventListener('click', () => board.recenter());
   setupSettings(el, settings, use3d);
+
+  // Ouverture / fermeture des volets
+  el.querySelectorAll<HTMLElement>('[data-open]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const ui = uiStates.get(el);
+      if (!ui) return;
+      ui.sheet = ui.sheet === b.dataset.open ? null : (b.dataset.open as SheetId);
+      rerender(el);
+    }),
+  );
+  const close = () => {
+    const ui = uiStates.get(el);
+    if (!ui) return;
+    // Le volet « montrer une carte » ne se ferme pas tant qu'on n'a pas choisi
+    if (ui.sheet === 'refute') return;
+    ui.sheet = null;
+    rerender(el);
+  };
+  el.querySelector('#sheet-close')!.addEventListener('click', close);
+  el.querySelector('#sheet-backdrop')!.addEventListener('click', close);
   return board;
 }
 
-/** Panneau de réglages (⚙) affiché par-dessus le plateau. */
+function rerender(el: HTMLElement) {
+  const o = lastOptions.get(el);
+  if (o) renderGame(el, o);
+}
+
+/** Panneau de réglages (ouvert depuis le menu). */
 function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
   const panel = el.querySelector<HTMLElement>('#settings-panel')!;
   const opt = (name: string, value: string, label: string, checked: boolean) =>
@@ -192,7 +254,6 @@ function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
     <div class="set-row"><span>Caméra pendant la marche</span>${opt('back', '0', 'Vue de haut', !s.backCam)}${opt('back', '1', 'De dos', s.backCam)}</div>
     <p class="muted">Astuce : touche le plateau pendant une animation pour l'accélérer.</p>` : ''}
     <div class="row"><button class="primary" id="settings-close">OK</button></div>`;
-  el.querySelector('#settings-btn')!.addEventListener('click', () => (panel.hidden = !panel.hidden));
   panel.querySelector('#settings-close')!.addEventListener('click', () => (panel.hidden = true));
   panel.addEventListener('change', () => {
     const val = (n: string) => panel.querySelector<HTMLInputElement>(`input[name="${n}"]:checked`)?.value;
@@ -203,7 +264,6 @@ function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
       backCam: (val('back') ?? (s.backCam ? '1' : '0')) === '1',
     };
     saveSettings(next);
-    // On reconstruit le plateau avec les nouveaux réglages
     const o = lastOptions.get(el);
     destroyGameView(el);
     el.innerHTML = '';
@@ -215,7 +275,117 @@ function setupSettings(el: HTMLElement, s: DisplaySettings, use3d: boolean) {
 export function destroyGameView(el: HTMLElement) {
   boards.get(el)?.destroy();
   boards.delete(el);
+  document.body.classList.remove('in-game');
 }
+
+// ---------------------------------------------------------------------------
+// Annonces au milieu de l'écran
+
+function announce(el: HTMLElement, html: string, ms = 1600, cls = '') {
+  const ui = uiStates.get(el);
+  if (!ui) return;
+  ui.queue.push({ html, ms, cls });
+  if (!ui.showing && boardReady.has(el)) nextAnnounce(el);
+}
+
+function nextAnnounce(el: HTMLElement) {
+  const ui = uiStates.get(el);
+  const layer = el.querySelector<HTMLElement>('#announce');
+  if (!ui || !layer) return;
+  const item = ui.queue.shift();
+  if (!item) {
+    ui.showing = false;
+    return;
+  }
+  ui.showing = true;
+  const box = document.createElement('div');
+  box.className = `announce ${item.cls ?? ''}`;
+  box.innerHTML = item.html;
+  layer.appendChild(box);
+  requestAnimationFrame(() => box.classList.add('in'));
+  // Toucher l'annonce la passe
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    box.classList.remove('in');
+    box.classList.add('out');
+    setTimeout(() => {
+      box.remove();
+      nextAnnounce(el);
+    }, 280);
+  };
+  box.addEventListener('click', finish);
+  setTimeout(finish, item.ms);
+}
+
+function onBoardEvent(el: HTMLElement, e: BoardEvent) {
+  const o = lastOptions.get(el);
+  if (!o) return;
+  if (e.type === 'ready') {
+    if (boardReady.has(el)) return;
+    boardReady.add(el);
+    const ui = uiStates.get(el);
+    if (ui && !ui.showing) setTimeout(() => nextAnnounce(el), 400);
+    return;
+  }
+  if (e.type === 'dice') {
+    announce(el, `<div class="big-number">${e.total}</div><div class="sub">${nameOf(o.state, e.player, o.me)}</div>`, 1500, 'dice');
+  }
+}
+
+/** Ordre de jeu : index du joueur dans la liste (pour savoir quand un nouveau « tour de table » commence). */
+function roundOf(g: GameState): number {
+  return Math.floor((g.turn - 1) / g.players.length) + 1;
+}
+
+/** Transforme les nouveaux événements du journal en annonces. */
+function announceLog(el: HTMLElement, v: PlayerView, fresh: LogEntry[], me: string) {
+  const n = (id: string) => nameOf(v, id, me);
+  const c = (id: CardId) => getCard(id).name;
+  for (const e of fresh) {
+    switch (e.type) {
+      case 'moved': {
+        const to = e.path.at(-1)!;
+        if (to.type === 'room') announce(el, `${n(e.player)}<div class="sub">entre dans</div><div class="title">${c(to.room)}</div>`, 1700);
+        break;
+      }
+      case 'secretPassage':
+        announce(el, `🕳️ Passage secret<div class="sub">${n(e.player)} → ${c(e.to)}</div>`, 1800);
+        break;
+      case 'suggested':
+        announce(
+          el,
+          `<div class="sub">${n(e.player)} soupçonne…</div>
+          <div class="card-row center tight">${cardHTML(e.suspect, { size: 'sm' })}${cardHTML(e.weapon, { size: 'sm' })}${cardHTML(e.room, { size: 'sm' })}</div>`,
+          3200,
+          'wide',
+        );
+        break;
+      case 'noOneRefuted':
+        if (e.player !== me) announce(el, `🤫 Personne ne peut répondre !`, 2000);
+        break;
+      case 'cardShown':
+        if (e.to !== me && e.player !== me) announce(el, `${n(e.player)}<div class="sub">montre une carte à</div>${n(e.to)}`, 1800);
+        break;
+      case 'accused':
+        announce(el, `⚖️ ${n(e.player)}<div class="sub">lance une accusation !</div>`, 1800);
+        announce(el, e.correct ? `<div class="title gold">C'est juste !</div>` : `<div class="title red">C'est faux…</div>`, 2200, e.correct ? 'win' : 'lose');
+        break;
+      case 'eliminated':
+        announce(el, `${n(e.player)}<div class="sub">est éliminé (mais montre toujours ses cartes)</div>`, 2200);
+        break;
+      case 'gameOver':
+        if (e.reason === 'abandoned') announce(el, `Partie abandonnée`, 2200);
+        else if (e.winner) announce(el, `🏆 ${n(e.winner)}<div class="sub">a gagné !</div>`, 3000, 'win');
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 export function renderGame(el: HTMLElement, o: GameViewOptions) {
   lastOptions.set(el, o);
@@ -228,158 +398,187 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   const dests = a.move && !paused ? getDestinations(g) : [];
   const myPos = v.pawns[mePlayer.suspect];
   const myRoom = myPos.type === 'room' ? myPos.room : null;
-  const waitingFor = g.phase === 'refuting' ? g.pending!.refuter : g.currentPlayer;
   const myHand = mePlayer.hand ?? [];
+  const board = ensureLayout(el);
 
-  // État d'interface (réinitialisé si le joueur qui regarde change, ex. en mode test)
+  // État d'interface
   let ui = uiStates.get(el);
+  const firstRender = !ui;
   if (!ui || ui.me !== me) {
-    ui = { tab: 'action', accuseOpen: false, seen: ui?.seen ?? {}, me };
+    ui = { sheet: null, seen: ui?.seen ?? {}, me, announcedTurn: ui?.announcedTurn ?? 0, queue: ui?.queue ?? [], showing: ui?.showing ?? false };
     uiStates.set(el, ui);
   }
   if (ui.seen[me] === undefined || ui.seen[me] > g.log.length) ui.seen[me] = g.log.length;
-  const myMove = !paused && g.phase !== 'finished' && (g.currentPlayer === me || a.showCard.length > 0);
-  if (myMove && ui.tab !== 'action' && (a.showCard.length > 0 || a.suggest)) ui.tab = 'action';
 
+  // Volets ouverts automatiquement quand c'est à moi d'agir
+  if (a.showCard.length && !paused) ui.sheet = 'refute';
+  else if (ui.sheet === 'refute') ui.sheet = null;
+  if (g.phase === 'finished' && ui.sheet !== 'end' && ui.sheet !== 'log') ui.sheet = ui.sheet ?? null;
+  if (ui.sheet === 'suggest' && !a.suggest) ui.sheet = null;
+  if (ui.sheet === 'accuse' && !a.accuse) ui.sheet = null;
+
+  // ---------------- Barre des joueurs (en haut)
+  const players = el.querySelector<HTMLElement>('#players')!;
+  players.innerHTML = v.players
+    .map((p) => {
+      const s = SUSPECTS.find((x) => x.id === p.suspect)!;
+      const active = g.phase !== 'finished' && (p.id === g.currentPlayer || (g.phase === 'refuting' && g.pending?.refuter === p.id));
+      const off = o.pausedBy?.includes(p.name);
+      return `<div class="pl ${active ? 'active' : ''} ${p.eliminated ? 'out' : ''} ${p.id === me ? 'me' : ''}">
+        <div class="pl-avatar" style="--c:${s.color}">${esc(p.name.slice(0, 1).toUpperCase())}</div>
+        <div class="pl-name">${p.id === me ? 'Toi' : esc(p.name)}${off ? ' 📴' : ''}</div>
+        <div class="pl-cards">🃏${p.handSize}</div></div>`;
+    })
+    .join('');
+
+  // ---------------- Ligne d'état (petit texte sous la barre)
+  const status = el.querySelector<HTMLElement>('#status')!;
+  let statusHtml = '';
+  if (paused) statusHtml = `⏸ Partie en pause : ${o.pausedBy!.map(esc).join(', ')} ${o.pausedBy!.length > 1 ? 'sont déconnectés' : 'est déconnecté'}`;
+  else if (g.phase === 'finished') statusHtml = 'Partie terminée';
+  else if (g.phase === 'refuting' && g.pending!.refuter !== me) statusHtml = `${nameOf(v, g.pending!.refuter, me)} cherche une carte à montrer…`;
+  else if (g.currentPlayer !== me) statusHtml = `${nameOf(v, g.currentPlayer, me)} joue…`;
+  else if (a.move) statusHtml = `Touche une case verte ou une pièce avec une flèche`;
+  status.innerHTML = statusHtml;
+  status.classList.toggle('show', !!statusHtml);
+  if (o.error && o.error !== ui.lastError) toast(el, `⚠️ ${esc(o.error)}`);
+  ui.lastError = o.error;
+
+  // ---------------- Boutons d'action (en bas)
+  const actions = el.querySelector<HTMLElement>('#actions')!;
+  let act = '';
+  if (g.phase === 'finished') {
+    act = `<button class="primary pill" data-open="end">Voir la solution</button>`;
+  } else if (!paused && g.currentPlayer === me && g.phase !== 'refuting') {
+    if (a.roll) act += `<button class="dice-btn" id="roll" aria-label="Lancer les dés"><span class="dice-face">🎲</span><span class="dice-label">Lancer</span></button>`;
+    const small: string[] = [];
+    if (a.suggest) small.push(`<button class="primary pill glow" data-open="suggest">🔍 Hypothèse</button>`);
+    if (a.secretPassage) small.push(`<button class="pill" id="passage">🕳️ Passage → ${getCard(a.secretPassage).name}</button>`);
+    if (a.endTurn) small.push(`<button class="pill" id="end">${g.phase === 'start' ? 'Rester ici' : 'Finir mon tour'}</button>`);
+    if (a.accuse && g.phase !== 'moving') small.push(`<button class="pill danger" data-open="accuse">⚖️ Accuser</button>`);
+    if (small.length) act += `<div class="pill-row">${small.join('')}</div>`;
+  } else if (a.showCard.length) {
+    act = `<button class="primary pill glow" data-open="refute">🃏 Montrer une carte</button>`;
+  }
+  actions.innerHTML = act;
+  actions.querySelectorAll<HTMLElement>('[data-open]').forEach((b) =>
+    b.addEventListener('click', () => {
+      ui!.sheet = b.dataset.open as SheetId;
+      renderGame(el, o);
+    }),
+  );
+  const on = (root: HTMLElement, id: string, fn: () => void) => root.querySelector(`#${id}`)?.addEventListener('click', fn);
+  on(actions, 'roll', () => {
+    actions.querySelector('#roll')?.classList.add('rolling');
+    o.act({ type: 'roll', player: me });
+  });
+  on(actions, 'passage', () => o.act({ type: 'secretPassage', player: me }));
+  on(actions, 'end', () => o.act({ type: 'endTurn', player: me }));
+
+  // ---------------- Volets (en bas)
+  const sheet = el.querySelector<HTMLElement>('#sheet')!;
+  const body = el.querySelector<HTMLElement>('#sheet-body')!;
+  const backdrop = el.querySelector<HTMLElement>('#sheet-backdrop')!;
   const picker = (items: readonly { id: string }[], field: 'sSus' | 'sWea' | 'aSus' | 'aWea' | 'aRoo') =>
     `<div class="card-row">${items
       .map((c) => cardHTML(c.id as CardId, { size: 'sm', attrs: `data-pick="${field}" data-id="${c.id}"`, selected: ui![field] === c.id, note: myHand.includes(c.id as CardId) ? 'ta carte' : undefined }))
       .join('')}</div>`;
-
-  let controls = '';
-  if (g.phase === 'finished') {
-    controls = `<div class="winner">${
-      g.endReason === 'abandoned'
-        ? 'Partie abandonnée par le maître de jeu.'
-        : g.winner
-          ? `🏆 ${nameOf(g, g.winner, me)} a gagné !`
-          : 'Personne n’a gagné.'
-    }</div>
-      <p class="muted">La solution :</p>
-      <div class="card-row center">${cardHTML(g.solution.suspect)}${cardHTML(g.solution.weapon)}${cardHTML(g.solution.room)}</div>
-      ${o.onExit ? `<div class="row"><button class="primary" id="exit">${esc(o.onExit.label)}</button></div>` : ''}`;
-  } else if (paused) {
-    controls = `<div class="banner">⏸ Partie en pause : ${o.pausedBy!.map(esc).join(', ')} ${o.pausedBy!.length > 1 ? 'sont déconnectés' : 'est déconnecté'}. Elle reprendra à son retour.</div>`;
-  } else if (g.phase === 'refuting') {
-    const p = g.pending!;
-    const trio = `<div class="card-row center">${cardHTML(p.suspect, { size: 'sm' })}${cardHTML(p.weapon, { size: 'sm' })}${cardHTML(p.room, { size: 'sm' })}</div>`;
-    controls = a.showCard.length
-      ? `<p>${nameOf(g, p.by, me)} suppose :</p>${trio}
-        <p class="callout">Tu as ${a.showCard.length > 1 ? 'plusieurs de ces cartes : choisis celle' : 'une de ces cartes : touche-la'} pour la montrer. <b>Lui seul la verra.</b></p>
-        <div class="card-row center">${a.showCard.map((c) => cardHTML(c, { size: 'lg', attrs: `data-show="${c}"` })).join('')}</div>`
-      : `<p>${nameOf(g, p.by, me)} suppose :</p>${trio}
-        <p class="muted">En attente de ${nameOf(g, p.refuter, me)}, qui doit montrer une carte…</p>`;
-  } else if (g.currentPlayer !== me) {
-    controls = `<p class="muted">C'est au tour de ${nameOf(g, g.currentPlayer, me)}.</p>
-      ${g.dice ? `<p>Dés : <b>${g.dice.join(' + ')} = ${g.dice.reduce((x, y) => x + y, 0)}</b></p>` : ''}
-      ${mePlayer.eliminated ? '<p class="muted">Tu es éliminé : tu continues à montrer tes cartes quand on te le demande.</p>' : ''}`;
-  } else {
-    const total = g.dice ? g.dice.reduce((x, y) => x + y, 0) : 0;
-    controls = `
-      <div class="row">
-        ${a.roll ? `<button class="primary big" id="roll">🎲 Lancer les dés</button>` : ''}
-        ${a.secretPassage ? `<button id="passage">🕳️ Passage secret → ${getCard(a.secretPassage).name}</button>` : ''}
-        ${a.endTurn ? `<button id="end">Finir mon tour</button>` : ''}
-      </div>
-      ${g.dice ? `<p>Dés : <b>${g.dice.join(' + ')} = ${total}</b>${a.move ? ` · tu peux avancer de <b>1 à ${total}</b> cases : touche une case verte ou une pièce avec une flèche.` : ''}</p>` : ''}
-      ${a.suggest ? `
-        <div class="panel inner"><h2>Hypothèse dans : ${getCard(myRoom!).name}</h2>
-          <p class="muted">Choisis un suspect et une arme :</p>
-          ${picker(SUSPECTS, 'sSus')}
-          ${picker(WEAPONS, 'sWea')}
-          <div class="row"><button class="primary" id="suggest" ${ui.sSus && ui.sWea ? '' : 'disabled'}>Proposer l'hypothèse</button></div>
-        </div>` : ''}
-      ${a.accuse ? `
-        <details class="panel inner" id="accuse-box" ${ui.accuseOpen ? 'open' : ''}><summary>⚖️ Accusation finale</summary>
-          <p class="muted">Tu penses avoir trouvé ? Si tu te trompes, tu es éliminé.</p>
-          ${picker(SUSPECTS, 'aSus')}${picker(WEAPONS, 'aWea')}${picker(ROOMS, 'aRoo')}
-          <div class="row"><button class="danger" id="accuse" ${ui.aSus && ui.aWea && ui.aRoo ? '' : 'disabled'}>Accuser</button></div></details>` : ''}`;
-  }
-
-  const board = ensureLayout(el);
-  const side = el.querySelector<HTMLElement>('#gv-side')!;
-  el.querySelector<HTMLElement>('#gv-top')!.innerHTML = o.banner ?? '';
-
   const nbKey = notebookKey(me, myHand);
   const nb = loadNotebook(nbKey);
-  const tabBtn = (id: UiState['tab'], label: string, badge = false) =>
-    `<button class="gv-tab ${ui!.tab === id ? 'active' : ''}" data-tab="${id}">${label}${badge ? '<span class="dot"></span>' : ''}</button>`;
-  side.className = `tab-${ui.tab}`;
-  side.innerHTML = `
-    <nav class="gv-tabs">${tabBtn('action', 'Jeu', myMove)}${tabBtn('cards', 'Cartes')}${tabBtn('notebook', 'Carnet')}${tabBtn('log', 'Journal')}</nav>
-    <section class="panel" data-sec="action">
-      <h2>${g.phase === 'finished' ? 'Fin de partie' : `Tour ${g.turn} : ${nameOf(g, waitingFor, me)}`}</h2>
-      ${controls}
-      <div class="error">${esc(o.error ?? '')}</div>
-      ${a.abandon && g.phase !== 'finished' ? `<div class="row"><button class="danger small" id="abandon">Abandonner la partie (maître de jeu)</button></div>` : ''}
-    </section>
-    <section class="panel" data-sec="cards"><h2>Mes cartes</h2>
-      <div class="card-row hand">${myHand.map((c) => cardHTML(c, { size: 'md' })).join('')}</div>
-      <p class="muted">Ces cartes ne sont pas dans l'enveloppe : leurs suspects, armes et pièces sont innocents.</p>
-    </section>
-    <section class="panel" data-sec="notebook"><h2>Carnet d'enquête</h2>${renderNotebook(me, v, nb)}</section>
-    <section class="panel" data-sec="log"><h2>Joueurs</h2>
-      ${v.players.map((p) => `<div class="row" style="margin:2px 0">${nameOf(v, p.id, me)}
-        <span class="muted">${p.handSize} cartes${p.id === g.hostId ? ' · maître de jeu' : ''}${p.eliminated ? ' · éliminé' : ''}</span></div>`).join('')}
-      <h2 style="margin-top:12px">Journal</h2><div class="log">${[...v.log].reverse().map((e) => `<div>${logLine(v, e)}</div>`).join('')}</div>
-    </section>`;
-
-  board.update({
-    state: g,
-    me,
-    destinations: dests,
-    onPick: (dest) => o.act({ type: 'move', player: me, to: dest.to }),
-  });
-
-  // Révélations : carte qu'on vient de me montrer, ou personne n'a pu répondre
-  const fresh = v.log.slice(ui.seen[me]);
-  ui.seen[me] = v.log.length;
-  for (const e of fresh) {
-    if (e.type === 'cardShown' && e.to === me && e.card) showReveal(el, `${nameOf(v, e.player, me)} te montre :`, e.card);
-    else if (e.type === 'cardShown' && e.player === me && e.card) toast(el, `Tu as montré « ${getCard(e.card).name} » à ${nameOf(v, e.to, me)}.`);
-    else if (e.type === 'noOneRefuted' && e.player === me) showReveal(el, 'Personne n’a pu répondre à ton hypothèse !', null);
+  let content = '';
+  switch (ui.sheet) {
+    case 'cards':
+      content = `<h2>Mes cartes</h2><div class="card-row center">${myHand.map((c) => cardHTML(c, { size: 'md' })).join('')}</div>
+        <p class="muted">Ces cartes ne sont pas dans l'enveloppe : leurs suspects, armes et pièces sont innocents.</p>`;
+      break;
+    case 'notebook':
+      content = `<h2>Carnet d'enquête</h2>${renderNotebook(me, v, nb)}`;
+      break;
+    case 'log':
+      content = `<h2>Journal</h2><div class="log">${[...v.log].reverse().map((e) => `<div>${logLine(v, e)}</div>`).join('')}</div>`;
+      break;
+    case 'suggest':
+      content = `<h2>Hypothèse dans : ${myRoom ? getCard(myRoom).name : ''}</h2>
+        <p class="muted">Qui, et avec quoi ? Touche un suspect et une arme.</p>
+        ${picker(SUSPECTS, 'sSus')}${picker(WEAPONS, 'sWea')}
+        <div class="row"><button class="primary big" id="suggest" ${ui.sSus && ui.sWea ? '' : 'disabled'}>Proposer l'hypothèse</button></div>`;
+      break;
+    case 'accuse':
+      content = `<h2>⚖️ Accusation finale</h2>
+        <p class="muted">Tu penses avoir trouvé ? Si tu te trompes, tu es éliminé.</p>
+        ${picker(SUSPECTS, 'aSus')}${picker(WEAPONS, 'aWea')}${picker(ROOMS, 'aRoo')}
+        <div class="row"><button class="danger big" id="accuse" ${ui.aSus && ui.aWea && ui.aRoo ? '' : 'disabled'}>Accuser</button></div>`;
+      break;
+    case 'refute': {
+      const p = g.pending!;
+      content = `<h2>Montre une carte</h2>
+        <p>${nameOf(v, p.by, me)} soupçonne :</p>
+        <div class="card-row center tight">${cardHTML(p.suspect, { size: 'sm' })}${cardHTML(p.weapon, { size: 'sm' })}${cardHTML(p.room, { size: 'sm' })}</div>
+        <p class="callout">Tu as ${a.showCard.length > 1 ? 'plusieurs de ces cartes : choisis celle' : 'une de ces cartes : touche-la'} pour la montrer. <b>Lui seul la verra.</b></p>
+        <div class="card-row center">${a.showCard.map((c) => cardHTML(c, { size: 'lg', attrs: `data-show="${c}"` })).join('')}</div>`;
+      break;
+    }
+    case 'end':
+      content = `<h2>Fin de partie</h2>
+        <div class="winner">${g.endReason === 'abandoned' ? 'Partie abandonnée par le maître de jeu.' : g.winner ? `🏆 ${nameOf(v, g.winner, me)} a gagné !` : 'Personne n’a gagné.'}</div>
+        <p class="muted">La solution :</p>
+        <div class="card-row center">${cardHTML(g.solution.suspect)}${cardHTML(g.solution.weapon)}${cardHTML(g.solution.room)}</div>
+        ${o.onExit ? `<div class="row"><button class="primary" id="exit">${esc(o.onExit.label)}</button></div>` : ''}`;
+      break;
+    case 'menu':
+      content = `<h2>Menu</h2>
+        <div class="menu-extra">${o.banner ?? ''}</div>
+        <div class="menu-list">
+          ${o.onHome ? `<button id="go-home">← Retour à l'accueil</button>` : ''}
+          <button id="open-settings">⚙ Réglages d'affichage</button>
+          ${a.abandon && g.phase !== 'finished' ? `<button class="danger" id="abandon">Abandonner la partie (maître de jeu)</button>` : ''}
+        </div>`;
+      break;
+    default:
+      content = '';
   }
+  body.innerHTML = content;
+  sheet.classList.toggle('open', !!ui.sheet);
+  sheet.classList.toggle('locked', ui.sheet === 'refute');
+  backdrop.classList.toggle('open', !!ui.sheet);
 
-  // Événements
-  const on = (id: string, fn: () => void) => side.querySelector(`#${id}`)?.addEventListener('click', fn);
-  side.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) =>
-    b.addEventListener('click', () => {
-      ui!.tab = b.dataset.tab as UiState['tab'];
-      renderGame(el, o);
-    }),
-  );
-  side.querySelectorAll<HTMLElement>('[data-pick]').forEach((c) =>
+  // Événements des volets
+  body.querySelectorAll<HTMLElement>('[data-pick]').forEach((c) =>
     c.addEventListener('click', () => {
       ui![c.dataset.pick as 'sSus'] = c.dataset.id;
       renderGame(el, o);
     }),
   );
-  side.querySelector<HTMLDetailsElement>('#accuse-box')?.addEventListener('toggle', (e) => {
-    ui!.accuseOpen = (e.target as HTMLDetailsElement).open;
-  });
-  on('exit', () => o.onExit?.run());
-  on('roll', () => o.act({ type: 'roll', player: me }));
-  on('passage', () => o.act({ type: 'secretPassage', player: me }));
-  on('end', () => o.act({ type: 'endTurn', player: me }));
-  on('suggest', () => {
+  on(body, 'suggest', () => {
     const { sSus, sWea } = ui!;
     if (!sSus || !sWea) return;
     ui!.sSus = ui!.sWea = undefined;
+    ui!.sheet = null;
     o.act({ type: 'suggest', player: me, suspect: sSus as never, weapon: sWea as never });
   });
-  on('accuse', () => {
-    if (!confirmInline(side, 'accuse', 'Sûr ? Touche encore pour accuser')) return;
+  on(body, 'accuse', () => {
+    if (!confirmInline(body, 'accuse', 'Sûr ? Touche encore pour accuser')) return;
     const { aSus, aWea, aRoo } = ui!;
-    ui!.accuseOpen = false;
+    ui!.sheet = null;
     o.act({ type: 'accuse', player: me, suspect: aSus as never, weapon: aWea as never, room: aRoo as never });
   });
-  on('abandon', () => {
-    if (confirmInline(side, 'abandon', 'Confirmer l’abandon ?')) o.act({ type: 'abandon', player: me });
-  });
-  side.querySelectorAll<HTMLElement>('[data-show]').forEach((b) =>
-    b.addEventListener('click', () => o.act({ type: 'showCard', player: me, card: b.dataset.show as CardId })),
+  body.querySelectorAll<HTMLElement>('[data-show]').forEach((b) =>
+    b.addEventListener('click', () => {
+      ui!.sheet = null;
+      o.act({ type: 'showCard', player: me, card: b.dataset.show as CardId });
+    }),
   );
-  side.querySelectorAll<HTMLElement>('[data-nb]').forEach((td) =>
+  on(body, 'exit', () => o.onExit?.run());
+  on(body, 'go-home', () => o.onHome?.());
+  on(body, 'open-settings', () => {
+    ui!.sheet = null;
+    renderGame(el, o);
+    el.querySelector<HTMLElement>('#settings-panel')!.hidden = false;
+  });
+  on(body, 'abandon', () => {
+    if (confirmInline(body, 'abandon', 'Confirmer l’abandon ?')) o.act({ type: 'abandon', player: me });
+  });
+  body.querySelectorAll<HTMLElement>('[data-nb]').forEach((td) =>
     td.addEventListener('click', () => {
       const cur = MARKS.indexOf(td.textContent ?? '');
       const next = MARKS[(cur + 1) % MARKS.length];
@@ -389,6 +588,47 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
       td.className = `nb-cell ${td.classList.contains('status') ? 'status' : ''} ${next === '✓' ? 'yes' : next === '✗' ? 'no' : next === '?' ? 'maybe' : ''}`;
     }),
   );
+
+  // ---------------- Plateau
+  board.update({
+    state: g,
+    me,
+    destinations: dests,
+    onPick: (dest) => o.act({ type: 'move', player: me, to: dest.to }),
+  });
+
+  // ---------------- Annonces
+  const fresh = v.log.slice(ui.seen[me]);
+  ui.seen[me] = v.log.length;
+  if (!firstRender) announceLog(el, v, fresh, me);
+  if (fresh.some((e) => e.type === 'gameOver'))
+    setTimeout(() => {
+      const u = uiStates.get(el);
+      if (u && !u.sheet) {
+        u.sheet = 'end';
+        rerender(el);
+      }
+    }, 7000);
+  for (const e of fresh) {
+    if (e.type === 'cardShown' && e.to === me && e.card) showReveal(el, `${nameOf(v, e.player, me)} te montre :`, e.card);
+    else if (e.type === 'cardShown' && e.player === me && e.card) toast(el, `Tu as montré « ${getCard(e.card).name} » à ${nameOf(v, e.to, me)}.`);
+    else if (e.type === 'noOneRefuted' && e.player === me) showReveal(el, 'Personne n’a pu répondre à ton hypothèse !', null);
+  }
+  // Début de tour : « Tour N » (nouveau tour de table) puis « Tour de X »
+  if (g.phase !== 'finished' && ui.announcedTurn !== g.turn && g.phase === 'start') {
+    ui.announcedTurn = g.turn;
+    const newRound = (g.turn - 1) % g.players.length === 0;
+    if (newRound) announce(el, `<div class="title gold">${roundOf(g) === 1 ? '1<sup>er</sup> tour' : `Tour ${roundOf(g)}`}</div>`, 1400, 'round');
+    const cur = v.players.find((p) => p.id === g.currentPlayer)!;
+    const color = SUSPECTS.find((s) => s.id === cur.suspect)!.color;
+    announce(
+      el,
+      g.currentPlayer === me
+        ? `<div class="avatar-big" style="--c:${color}"></div><div class="title">À toi de jouer !</div>`
+        : `<div class="avatar-big" style="--c:${color}"></div><div class="sub">Tour de</div><div class="title">${esc(cur.name)}</div>`,
+      1700,
+    );
+  }
 }
 
 /** Grande carte qui se retourne au milieu de l'écran (visible seulement par celui qui la reçoit). */

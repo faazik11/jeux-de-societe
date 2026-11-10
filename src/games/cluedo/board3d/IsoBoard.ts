@@ -132,12 +132,15 @@ export class IsoBoard {
   /** Appelé par la scène quand elle est prête. */
   sceneReady(scene: BoardScene) {
     this.scene = scene;
+    setTimeout(() => this.onEvent?.({ type: 'ready' }), 50);
     if (this.pending) scene.apply(this.pending);
   }
 
   recenter() {
     this.scene?.recenter();
   }
+
+  onEvent: ((e: { type: 'dice'; total: number; player: string } | { type: 'ready' }) => void) | null = null;
 
   update(u: BoardUpdate) {
     this.pending = u;
@@ -521,7 +524,10 @@ function makeSceneClass(P: typeof Phaser) {
 
     private async playEntries(entries: LogEntry[], state: GameState) {
       for (const e of entries) {
-        if (e.type === 'rolled') await this.owner.rollDice(e.dice);
+        if (e.type === 'rolled') {
+          await this.owner.rollDice(e.dice);
+          this.owner.onEvent?.({ type: 'dice', total: e.dice.reduce((a, b) => a + b, 0), player: e.player });
+        }
         else if (e.type === 'moved') await this.walk(this.suspectOf(state, e.player), e.path);
         else if (e.type === 'secretPassage') {
           const s = this.suspectOf(state, e.player);

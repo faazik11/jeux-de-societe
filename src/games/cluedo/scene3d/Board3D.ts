@@ -1062,7 +1062,7 @@ export class Board3D {
     const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
     const dW = (size.x / 2 + 1.2) / Math.tan(hfov / 2);
     const dH = ((size.z * 0.82) / 2 + 1.4) / Math.tan(vfov / 2);
-    this.lookFrom(center, THREE.MathUtils.clamp(Math.max(dW, dH), 7, 40), speed);
+    this.lookFrom(center, THREE.MathUtils.clamp(Math.max(dW, dH), 9.5, 40), speed);
   }
 
   /** Plan sur une pièce, vue de l'avant, comme une scène de théâtre. */

@@ -56,8 +56,8 @@ export function startLocal(app: HTMLElement, goHome: () => void) {
       state: g,
       me: g.phase === 'finished' ? g.hostId : actor,
       error,
-      banner: `<div class="row"><button id="home2">← Accueil</button></div>
-        <div class="banner">Mode test : on voit l'écran du joueur qui doit agir.</div>`,
+      banner: `<p class="muted">Mode test : tous les joueurs sur le même écran, on voit l'écran du joueur qui doit agir.</p>`,
+      onHome: goHome,
       act: (action) => {
         try {
           game = applyAction(game!, action);
@@ -69,7 +69,6 @@ export function startLocal(app: HTMLElement, goHome: () => void) {
       },
       onExit: { label: 'Nouvelle partie', run: () => { game = null; setup(); } },
     });
-    app.querySelector('#home2')?.addEventListener('click', goHome);
   };
 
   setup();

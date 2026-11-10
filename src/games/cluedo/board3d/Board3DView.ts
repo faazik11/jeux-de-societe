@@ -36,6 +36,8 @@ export class Board3DView {
   private animating = false;
   private reachKey = '';
   private failed = false;
+  /** Événements pour l'interface (ex. résultat des dés une fois qu'ils sont arrêtés). */
+  onEvent: ((e: { type: 'dice'; total: number; player: string } | { type: 'ready' }) => void) | null = null;
 
   private constructor(private host: HTMLElement, private settings: DisplaySettings, private onUserCamera: (user: boolean) => void) {}
 
@@ -56,6 +58,8 @@ export class Board3DView {
       };
       this.scene = scene;
       if (this.latest) this.apply(this.latest);
+      // Le plateau est affiché : l'interface peut lancer ses annonces
+      requestAnimationFrame(() => requestAnimationFrame(() => this.onEvent?.({ type: 'ready' })));
     } catch (e) {
       console.error(e);
       this.failed = true;
@@ -165,6 +169,7 @@ export class Board3DView {
       switch (e.type) {
         case 'rolled':
           await sc.rollDice(e.dice, this.suspectOf(st, e.player));
+          this.onEvent?.({ type: 'dice', total: e.dice.reduce((a, b) => a + b, 0), player: e.player });
           await sc.wait(250);
           break;
         case 'moved': {

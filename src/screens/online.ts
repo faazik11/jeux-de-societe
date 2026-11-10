@@ -173,8 +173,8 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
       me: uid,
       error,
       pausedBy: offline,
-      banner: `<div class="row" style="justify-content:space-between"><button id="home">← Accueil</button>
-        <span class="muted">Partie <b>${esc(code)}</b></span></div>`,
+      banner: `<p class="muted">Partie <b>${esc(code)}</b> · partage ce code pour inviter.</p>`,
+      onHome: () => go('#/'),
       act: async (action) => {
         try {
           await sendAction(code, action);
