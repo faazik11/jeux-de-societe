@@ -8,7 +8,8 @@
 import { IsoBoard, type BoardUpdate } from '../board3d/IsoBoard';
 import { Board3DView } from '../board3d/Board3DView';
 import { loadSettings, saveSettings, webglAvailable, type DisplaySettings } from './settings';
-import { cardBackHTML, cardHTML } from './cards';
+import { cardBackHTML, cardHTML, portraitHTML } from './cards';
+import { ICONS } from './icons';
 import {
   ROOMS,
   SUSPECTS,
@@ -178,21 +179,21 @@ function ensureLayout(el: HTMLElement): BoardLike {
     <div class="stage">
       <div id="board-host"></div>
       <div class="hud-top">
-        <button class="hud-btn" data-open="menu" title="Menu">☰</button>
+        <button class="hud-btn" data-open="menu" title="Menu">${ICONS.menu}</button>
         <div class="players-strip" id="players"></div>
-        <button class="hud-btn" id="recenter" title="Recentrer la caméra">⤢</button>
+        <button class="hud-btn" id="recenter" title="Recentrer la caméra">${ICONS.recenter}</button>
       </div>
       <div class="hud-status" id="status"></div>
-      <div class="cam-hint" id="cam-hint">Caméra libre · touche ⤢ pour recentrer</div>
+      <div class="cam-hint" id="cam-hint">Caméra libre · touche le viseur pour recentrer</div>
       <div class="announce-layer" id="announce"></div>
       <div class="hud-bottom">
         <div class="hud-side">
-          <button class="hud-btn labeled" data-open="cards"><span>🃏</span>Cartes</button>
-          <button class="hud-btn labeled" data-open="notebook"><span>📒</span>Carnet</button>
+          <button class="hud-btn labeled" data-open="cards">${ICONS.cards}Cartes</button>
+          <button class="hud-btn labeled" data-open="notebook">${ICONS.notebook}Carnet</button>
         </div>
         <div class="hud-actions" id="actions"></div>
         <div class="hud-side right">
-          <button class="hud-btn labeled" data-open="log"><span>📜</span>Journal</button>
+          <button class="hud-btn labeled" data-open="log">${ICONS.log}Journal</button>
         </div>
       </div>
       <div class="sheet-backdrop" id="sheet-backdrop"></div>
@@ -425,9 +426,9 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
       const active = g.phase !== 'finished' && (p.id === g.currentPlayer || (g.phase === 'refuting' && g.pending?.refuter === p.id));
       const off = o.pausedBy?.includes(p.name);
       return `<div class="pl ${active ? 'active' : ''} ${p.eliminated ? 'out' : ''} ${p.id === me ? 'me' : ''}">
-        <div class="pl-avatar" style="--c:${s.color}">${esc(p.name.slice(0, 1).toUpperCase())}</div>
+        <div class="pl-avatar" title="${s.name}">${portraitHTML(s.id)}</div>
         <div class="pl-name">${p.id === me ? 'Toi' : esc(p.name)}${off ? ' 📴' : ''}</div>
-        <div class="pl-cards">🃏${p.handSize}</div></div>`;
+        <div class="pl-cards"><i class="mini-card"></i>${p.handSize}</div></div>`;
     })
     .join('');
 
@@ -620,12 +621,12 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
     const newRound = (g.turn - 1) % g.players.length === 0;
     if (newRound) announce(el, `<div class="title gold">${roundOf(g) === 1 ? '1<sup>er</sup> tour' : `Tour ${roundOf(g)}`}</div>`, 1400, 'round');
     const cur = v.players.find((p) => p.id === g.currentPlayer)!;
-    const color = SUSPECTS.find((s) => s.id === cur.suspect)!.color;
+    const sus = SUSPECTS.find((s) => s.id === cur.suspect)!;
     announce(
       el,
       g.currentPlayer === me
-        ? `<div class="avatar-big" style="--c:${color}"></div><div class="title">À toi de jouer !</div>`
-        : `<div class="avatar-big" style="--c:${color}"></div><div class="sub">Tour de</div><div class="title">${esc(cur.name)}</div>`,
+        ? `<div class="avatar-big">${portraitHTML(sus.id)}</div><div class="sub">${sus.name}</div><div class="title">À toi de jouer !</div>`
+        : `<div class="avatar-big">${portraitHTML(sus.id)}</div><div class="sub">Tour de</div><div class="title">${esc(cur.name)}</div><div class="sub">${sus.name}</div>`,
       1700,
     );
   }

@@ -1,4 +1,4 @@
-// Données du jeu (thème basique provisoire : il sera remplacé par le thème original).
+// Données du jeu : personnages, armes et pièces du Cluedo (version française).
 // Pour changer le thème, il suffit de modifier les noms et couleurs ici :
 // les identifiants (id) restent les mêmes et le reste du code n'a pas à changer.
 
@@ -28,15 +28,18 @@ export interface SuspectInfo extends Card {
   id: SuspectId;
   kind: 'suspect';
   color: string;
+  /** Titre (« Colonel ») et nom (« Moutarde »), affichés sur deux lignes sur les cartes. */
+  title: string;
+  surname: string;
 }
 
 export const SUSPECTS: readonly SuspectInfo[] = [
-  { id: 'rouge', kind: 'suspect', name: 'Rouge', color: '#c0392b' },
-  { id: 'jaune', kind: 'suspect', name: 'Jaune', color: '#e1b12c' },
-  { id: 'blanc', kind: 'suspect', name: 'Blanc', color: '#ecf0f1' },
-  { id: 'vert', kind: 'suspect', name: 'Vert', color: '#27ae60' },
-  { id: 'bleu', kind: 'suspect', name: 'Bleu', color: '#2e86de' },
-  { id: 'violet', kind: 'suspect', name: 'Violet', color: '#8e44ad' },
+  { id: 'rouge', kind: 'suspect', name: 'Mlle Rose', title: 'Mademoiselle', surname: 'Rose', color: '#c8324a' },
+  { id: 'jaune', kind: 'suspect', name: 'Colonel Moutarde', title: 'Colonel', surname: 'Moutarde', color: '#d9a21b' },
+  { id: 'blanc', kind: 'suspect', name: 'Mme Leblanc', title: 'Madame', surname: 'Leblanc', color: '#e9e4d8' },
+  { id: 'vert', kind: 'suspect', name: 'Révérend Olive', title: 'Révérend', surname: 'Olive', color: '#3f8a4a' },
+  { id: 'bleu', kind: 'suspect', name: 'Mme Pervenche', title: 'Madame', surname: 'Pervenche', color: '#4f6fd0' },
+  { id: 'violet', kind: 'suspect', name: 'Professeur Violet', title: 'Professeur', surname: 'Violet', color: '#7d3c98' },
 ];
 
 export const WEAPONS: readonly Card[] = [

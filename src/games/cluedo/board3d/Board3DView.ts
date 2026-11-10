@@ -18,7 +18,7 @@
 import {
   SUSPECTS,
   WEAPONS,
-  getCard,
+  type CardId,
   type GameState,
   type LogEntry,
   type SuspectId,
@@ -245,12 +245,8 @@ export class Board3DView {
     }
   }
 
-  private trio(suspect: SuspectId, weapon: WeaponId, room: GameState['solution']['room']) {
-    return [
-      { kind: 'suspect' as const, name: getCard(suspect).name, color: SUSPECTS.find((s) => s.id === suspect)!.color },
-      { kind: 'weapon' as const, name: getCard(weapon).name },
-      { kind: 'room' as const, name: getCard(room).name },
-    ];
+  private trio(suspect: SuspectId, weapon: WeaponId, room: GameState['solution']['room']): CardId[] {
+    return [suspect, weapon, room];
   }
 
   /** Anneau sous le joueur actif + cases accessibles (avec cadrage de la zone la première fois). */

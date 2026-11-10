@@ -15,6 +15,7 @@ import {
   ROOMS,
   ROOM_RECTS,
   SUSPECTS,
+  type CardId,
   type Destination,
   type Position,
   type RoomId,
@@ -29,6 +30,7 @@ import { makeWeapon } from './weapons3d';
 import { Dice3D } from './dice3d';
 import { buildFurniture } from './furniture3d';
 import { CHARTE } from '../../../theme/charte';
+import { cardSVG } from '../ui/cards';
 
 const P = CHARTE.plateau;
 
@@ -812,42 +814,24 @@ export class Board3D {
     this.envelope = { group, flap, light, mark: q };
   }
 
-  private cardTexture(kind: 'suspect' | 'weapon' | 'room', name: string, color?: string) {
+  /** Face d'une carte : le même dessin que les cartes de l'interface (SVG rendu dans un canvas). */
+  private cardTexture(id: CardId) {
     const c = document.createElement('canvas');
-    c.width = 256;
-    c.height = 360;
+    c.width = 512;
+    c.height = 720;
     const g = c.getContext('2d')!;
     g.fillStyle = CHARTE.cartes.fond;
-    g.fillRect(0, 0, 256, 360);
-    g.strokeStyle = CHARTE.cartes.liseré;
-    g.lineWidth = 6;
-    g.strokeRect(14, 70, 228, 276);
-    const band = CHARTE.cartes[kind];
-    g.fillStyle = band;
-    g.fillRect(0, 0, 256, 64);
-    g.fillStyle = '#fff';
-    g.font = 'bold 26px system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.fillText(kind === 'suspect' ? 'SUSPECT' : kind === 'weapon' ? 'ARME' : 'PIÈCE', 128, 42);
-    if (color) {
-      g.fillStyle = color;
-      g.beginPath();
-      g.arc(128, 160, 52, 0, Math.PI * 2);
-      g.fill();
-      g.strokeStyle = '#0006';
-      g.lineWidth = 4;
-      g.stroke();
-    }
-    g.fillStyle = '#2a2018';
-    let size = 40;
-    g.font = `bold ${size}px 'Playfair Display', Georgia, serif`;
-    while (g.measureText(name).width > 220 && size > 18) g.font = `bold ${(size -= 2)}px 'Playfair Display', Georgia, serif`;
-    g.fillText(name, 128, color ? 280 : 200);
-    g.strokeStyle = band;
-    g.lineWidth = 8;
-    g.strokeRect(4, 4, 248, 352);
+    g.fillRect(0, 0, 512, 720);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
+    const img = new Image();
+    const url = URL.createObjectURL(new Blob([cardSVG(id)], { type: 'image/svg+xml' }));
+    img.onload = () => {
+      g.drawImage(img, 0, 0, 512, 720);
+      t.needsUpdate = true;
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
     return t;
   }
 
@@ -875,7 +859,7 @@ export class Board3D {
    * - cards : les trois cartes (accusation, ou solution)
    * - result : 'win' (accusation juste), 'wrong' (fausse : l'enveloppe reste fermée), 'reveal' (on montre la solution)
    */
-  async envelopeScene(cards: { kind: 'suspect' | 'weapon' | 'room'; name: string; color?: string }[], result: 'win' | 'wrong' | 'reveal') {
+  async envelopeScene(cards: CardId[], result: 'win' | 'wrong' | 'reveal') {
     this.clearCards();
     const env = this.envelope;
     env.mark.visible = false;
@@ -886,7 +870,7 @@ export class Board3D {
     }
     const back = new THREE.MeshBasicMaterial({ map: this.cardBack() });
     const meshes = cards.map((c, i) => {
-      const front = new THREE.MeshBasicMaterial({ map: this.cardTexture(c.kind, c.name, c.color) });
+      const front = new THREE.MeshBasicMaterial({ map: this.cardTexture(c) });
       const card = new THREE.Group();
       const f = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.87), front);
       const b = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.87), back);
