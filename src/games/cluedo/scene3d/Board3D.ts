@@ -28,6 +28,9 @@ import { makeFigure, type Figure } from './figure';
 import { makeWeapon } from './weapons3d';
 import { Dice3D } from './dice3d';
 import { buildFurniture } from './furniture3d';
+import { CHARTE } from '../../../theme/charte';
+
+const P = CHARTE.plateau;
 
 const Z = 1.45 / WALL.height; // conversion hauteur « pixels » du décor -> unités 3D
 const WALL_H = 1.45;
@@ -115,11 +118,11 @@ export class Board3D {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = P.exposition;
     host.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(0x14151b);
-    this.scene.fog = new THREE.Fog(0x14151b, 55, 110);
+    this.scene.background = new THREE.Color(P.fond);
+    this.scene.fog = new THREE.Fog(P.fond, 55, 110);
 
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
     this.camera.position.set(0, 22, 20);
@@ -188,8 +191,8 @@ export class Board3D {
   // ------------------------------------------------------------------ Construction
 
   private buildLights() {
-    this.scene.add(new THREE.HemisphereLight(0xfff4e0, 0x2a2018, 0.75));
-    const sun = new THREE.DirectionalLight(0xfff0d8, 1.6);
+    this.scene.add(new THREE.HemisphereLight(P.ambiance.ciel, P.ambiance.sol, P.ambiance.force));
+    const sun = new THREE.DirectionalLight(P.soleil.couleur, P.soleil.force);
     sun.position.set(-10, 22, -6);
     sun.castShadow = true;
     const mobile = Math.min(window.innerWidth, window.innerHeight) < 600;
@@ -202,7 +205,7 @@ export class Board3D {
     // Une lampe chaude dans chaque pièce
     for (const r of ROOMS) {
       const rect = ROOM_RECTS[r.id as RoomId];
-      const l = new THREE.PointLight(0xffc98a, 6, 7, 1.6);
+      const l = new THREE.PointLight(P.lampes.couleur, P.lampes.force, P.lampes.portee, 1.6);
       l.position.copy(world(rect.x + rect.w / 2, rect.y + rect.h / 2, 2.2));
       this.scene.add(l);
     }
@@ -214,7 +217,7 @@ export class Board3D {
 
   private buildBoard() {
     // Socle
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(BOARD_WIDTH + 0.6, 0.5, BOARD_HEIGHT + 0.6), this.mat(0x3b2416));
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(BOARD_WIDTH + 0.6, 0.5, BOARD_HEIGHT + 0.6), this.mat(P.socle));
     slab.position.set(0, -0.26, 0);
     slab.receiveShadow = true;
     this.scene.add(slab);
@@ -225,12 +228,13 @@ export class Board3D {
       for (let x = 0; x < BOARD_WIDTH; x++) {
         const t = CELLS[y][x];
         const odd = (x + y) % 2 === 1;
-        if (t === 'corridor') tiles.push({ x, y, color: odd ? 0xd8c9a3 : 0xcdbd94 });
+        // Couloirs : parquet en lames (une teinte par rangée, légèrement variée)
+        if (t === 'corridor') tiles.push({ x, y, color: new THREE.Color(y % 2 ? P.couloirA : P.couloirB).multiplyScalar(0.94 + ((x * 7 + y * 13) % 5) * 0.03).getHex() });
         else if (t === 'room') {
           const f = FLOOR[CELL_ROOM[y][x]!];
           tiles.push({ x, y, color: odd ? f.b : f.a });
         } else if (t === 'center') tiles.push({ x, y, color: 0x24242b });
-        else tiles.push({ x, y, color: 0x4a2f1c });
+        else tiles.push({ x, y, color: P.socle });
       }
     const tileGeo = new THREE.BoxGeometry(0.98, 0.04, 0.98);
     const tileMesh = new THREE.InstancedMesh(tileGeo, new THREE.MeshStandardMaterial({ roughness: 0.85 }), tiles.length);
@@ -246,7 +250,7 @@ export class Board3D {
 
     // Paillassons
     for (const d of DOORS) {
-      const mat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.05, 0.7), this.mat(0x9b7442));
+      const mat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.05, 0.7), this.mat(P.paillasson));
       mat.position.copy(world(d.x + 0.5, d.y + 0.5, 0.01));
       mat.receiveShadow = true;
       this.scene.add(mat);
@@ -274,7 +278,7 @@ export class Board3D {
     // Noms des pièces
     for (const r of ROOMS) {
       const rect = ROOM_RECTS[r.id as RoomId];
-      const s = this.label(r.name.toUpperCase(), 44, '#fff7e0');
+      const s = this.label(r.name.toUpperCase(), 44, CHARTE.couleurs.laitonClair);
       s.position.copy(world(rect.x + rect.w / 2, rect.y + rect.h - 0.3, 0.35));
       this.scene.add(s);
     }
@@ -284,11 +288,11 @@ export class Board3D {
   private label(text: string, px: number, color: string) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
-    ctx.font = `bold ${px}px system-ui, sans-serif`;
+    ctx.font = `bold ${px}px 'Playfair Display', Georgia, serif`;
     const w = Math.ceil(ctx.measureText(text).width) + px;
     canvas.width = w;
     canvas.height = Math.ceil(px * 1.5);
-    ctx.font = `bold ${px}px system-ui, sans-serif`;
+    ctx.font = `bold ${px}px 'Playfair Display', Georgia, serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineWidth = px / 6;
@@ -320,7 +324,16 @@ export class Board3D {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
       const c = world(x, y, 0);
       mesh.position.set(c.x, y0 + h / 2, c.z);
-      if (y0 === 0) this.wallBoxes.push({ center: mesh.position.clone(), size: new THREE.Vector3(w, h, d) });
+      if (y0 === 0) {
+        this.wallBoxes.push({ center: mesh.position.clone(), size: new THREE.Vector3(w, h, d) });
+        // Soubassement en bois (lambris) et corniche, style manoir
+        const lam = new THREE.Mesh(new THREE.BoxGeometry(w + 0.01, 0.5, d + 0.04), this.lambrisMat);
+        lam.position.set(c.x, 0.25, c.z);
+        const top = new THREE.Mesh(new THREE.BoxGeometry(w + 0.01, 0.07, d + 0.06), this.corniceMat);
+        top.position.set(c.x, h - 0.035, c.z);
+        lam.receiveShadow = top.receiveShadow = true;
+        this.scene.add(lam, top);
+      }
       mesh.castShadow = mesh.receiveShadow = true;
       this.scene.add(mesh);
     };
@@ -342,9 +355,11 @@ export class Board3D {
   /** Murs (pour que les dés rebondissent dessus au lieu de les traverser). */
   private wallBoxes: { center: THREE.Vector3; size: THREE.Vector3 }[] = [];
   private wallMat = new THREE.MeshStandardMaterial({ color: WALL.color, roughness: 0.9 });
-  private doorMat = new THREE.MeshStandardMaterial({ color: 0x7a4a26, roughness: 0.6 });
-  private frameMat = new THREE.MeshStandardMaterial({ color: 0x4e2f18, roughness: 0.6 });
-  private brassMat = new THREE.MeshStandardMaterial({ color: 0xd4a942, roughness: 0.3, metalness: 0.9 });
+  private doorMat = new THREE.MeshStandardMaterial({ color: P.porte, roughness: 0.55 });
+  private frameMat = new THREE.MeshStandardMaterial({ color: P.encadrement, roughness: 0.55 });
+  private brassMat = new THREE.MeshStandardMaterial({ color: P.poignee, roughness: 0.3, metalness: 0.9 });
+  private lambrisMat = new THREE.MeshStandardMaterial({ color: P.lambris, roughness: 0.6 });
+  private corniceMat = new THREE.MeshStandardMaterial({ color: P.murHaut, roughness: 0.6 });
 
   /** Porte en bois avec encadrement ; elle s'ouvre vers l'intérieur quand quelqu'un passe. */
   private buildDoor(dx: number, dy: number, room: RoomId, addWall: (x: number, y: number, w: number, d: number, h?: number, y0?: number) => void) {
@@ -802,9 +817,12 @@ export class Board3D {
     c.width = 256;
     c.height = 360;
     const g = c.getContext('2d')!;
-    g.fillStyle = '#f5eedc';
+    g.fillStyle = CHARTE.cartes.fond;
     g.fillRect(0, 0, 256, 360);
-    const band = kind === 'suspect' ? '#a8322b' : kind === 'weapon' ? '#2e6cb0' : '#2f8a4a';
+    g.strokeStyle = CHARTE.cartes.liseré;
+    g.lineWidth = 6;
+    g.strokeRect(14, 70, 228, 276);
+    const band = CHARTE.cartes[kind];
     g.fillStyle = band;
     g.fillRect(0, 0, 256, 64);
     g.fillStyle = '#fff';
@@ -822,8 +840,8 @@ export class Board3D {
     }
     g.fillStyle = '#2a2018';
     let size = 40;
-    g.font = `bold ${size}px Georgia, serif`;
-    while (g.measureText(name).width > 220 && size > 18) g.font = `bold ${(size -= 2)}px Georgia, serif`;
+    g.font = `bold ${size}px 'Playfair Display', Georgia, serif`;
+    while (g.measureText(name).width > 220 && size > 18) g.font = `bold ${(size -= 2)}px 'Playfair Display', Georgia, serif`;
     g.fillText(name, 128, color ? 280 : 200);
     g.strokeStyle = band;
     g.lineWidth = 8;
@@ -838,7 +856,7 @@ export class Board3D {
     c.width = 256;
     c.height = 360;
     const g = c.getContext('2d')!;
-    g.fillStyle = '#3b1f2b';
+    g.fillStyle = CHARTE.couleurs.bordeaux;
     g.fillRect(0, 0, 256, 360);
     g.strokeStyle = '#c9a24a';
     g.lineWidth = 8;

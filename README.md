@@ -15,6 +15,11 @@ Site : https://faazik11.github.io/jeux-de-societe/
 - [x] Appli installable sur l'écran d'accueil (PWA), utilisable hors ligne en mode test
 - [x] Cartes illustrées, carte montrée qui se retourne, carnet d'enquête en grille, onglets sur téléphone
 
+## Style
+
+Thème « Manoir victorien ». **Toutes les couleurs, polices et matières sont dans `src/theme/charte.ts`** :
+pour ajuster le style, on modifie ce fichier, et l'interface, les cartes et le plateau 3D suivent.
+
 ## Organisation du code
 
 ```

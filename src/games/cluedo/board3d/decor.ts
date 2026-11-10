@@ -3,6 +3,7 @@
 // Pour remplacer par de vraies images plus tard, il suffira de changer ce fichier.
 
 import type { RoomId } from '../engine';
+import { CHARTE } from '../../../theme/charte';
 
 export type DecorItem =
   | { kind: 'box'; x: number; y: number; w: number; d: number; h: number; color: number; top?: number; stripes?: number[] }
@@ -17,19 +18,9 @@ const DARK_WOOD = 0x5b3a1e;
 const BOOKS = [0xb03a2e, 0x2e6eb0, 0x3f8f4a, 0xd4a017, 0x7d3c98, 0xe0e0e0];
 
 /** Couleur du sol de chaque pièce. */
-export const FLOOR: Record<RoomId, { a: number; b: number }> = {
-  cuisine: { a: 0xd9d4c7, b: 0xb9b2a2 }, // carrelage en damier
-  bal: { a: 0xa0703f, b: 0x956838 }, // parquet clair
-  veranda: { a: 0xc7b88f, b: 0xb8a97f },
-  salleAManger: { a: 0x7a4f2c, b: 0x734a29 },
-  billard: { a: 0x5c3d2e, b: 0x553828 },
-  bibliotheque: { a: 0x6a4630, b: 0x63412c },
-  salon: { a: 0x6e3b3b, b: 0x673737 },
-  hall: { a: 0xcfc6b4, b: 0x9e9584 }, // marbre en damier
-  bureau: { a: 0x5a4632, b: 0x54412e },
-};
+export const FLOOR = CHARTE.sols as Record<RoomId, { a: number; b: number }>;
 
-export const WALL = { color: 0xe6dccb, top: 0xf6efe2, height: 34 };
+export const WALL = { color: CHARTE.plateau.mur, top: CHARTE.plateau.murHaut, height: 34 };
 
 export const DECOR: Record<RoomId, DecorItem[]> = {
   cuisine: [

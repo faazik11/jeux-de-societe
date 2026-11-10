@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { RoomId } from '../engine';
+import { CHARTE } from '../../../theme/charte';
 
 export interface Placement {
   m: string;
@@ -125,6 +126,26 @@ function load(name: string): Promise<THREE.Object3D> {
         if (m.isMesh) {
           m.castShadow = true;
           m.receiveShadow = true;
+          // Recoloration selon la charte (acajou, velours, laiton…)
+          const mats = Array.isArray(m.material) ? m.material : [m.material];
+          m.material = mats.map((mat) => {
+            const std = mat as THREE.MeshStandardMaterial;
+            const col = CHARTE.meubles[std.name];
+            if (col === undefined) return mat;
+            const c = std.clone();
+            c.color.setHex(col);
+            if (std.name.startsWith('metal')) {
+              c.metalness = 0.85;
+              c.roughness = 0.35;
+            } else if (std.name.startsWith('carpet')) c.roughness = 0.95;
+            else if (std.name.startsWith('wood')) c.roughness = 0.55;
+            if (std.name === 'lamp') {
+              c.emissive = new THREE.Color(0xffc070);
+              c.emissiveIntensity = 0.6;
+            }
+            return c;
+          }) as unknown as THREE.Material;
+          if ((m.material as unknown as THREE.Material[]).length === 1) m.material = (m.material as unknown as THREE.Material[])[0];
         }
       });
       return g.scene;

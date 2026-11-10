@@ -1,11 +1,17 @@
 // Point d'entrée : petite navigation par l'adresse (#/ accueil, #/test mode test, #/p/CODE partie en ligne).
 
+import '@fontsource/playfair-display/400.css';
+import '@fontsource/playfair-display/700.css';
+import '@fontsource/lora/400.css';
+import '@fontsource/lora/600.css';
 import './style.css';
+import { applyCharteCss } from './theme/charte';
 import './pwa';
 import { renderHome, startOnline } from './screens/online';
 import { startLocal } from './screens/local';
 import { destroyGameView } from './games/cluedo/ui/gameView';
 
+applyCharteCss();
 const app = document.getElementById('app')!;
 let cleanup: (() => void) | null = null;
 

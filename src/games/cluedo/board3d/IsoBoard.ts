@@ -26,6 +26,7 @@ import {
   type WeaponId,
 } from '../engine';
 import { DECOR, FLOOR, WALL, WEAPON_ICON, type DecorItem } from './decor';
+import { CHARTE } from '../../../theme/charte';
 
 // Taille d'une case à l'écran (losange de 64 x 32 pixels)
 const HW = 32;
@@ -242,7 +243,7 @@ function makeSceneClass(P: typeof Phaser) {
         for (let x = 0; x < BOARD_WIDTH; x++) {
           const t = CELLS[y][x];
           const odd = (x + y) % 2 === 1;
-          if (t === 'corridor') this.tile(floor, x, y, odd ? 0xd8c9a3 : 0xcfbe95);
+          if (t === 'corridor') this.tile(floor, x, y, odd ? CHARTE.plateau.couloirA : CHARTE.plateau.couloirB);
           else if (t === 'room') {
             const f = FLOOR[CELL_ROOM[y][x]!];
             this.tile(floor, x, y, odd ? f.b : f.a);
