@@ -405,3 +405,53 @@ button.pill.danger { background: linear-gradient(180deg, var(--velvet-light), va
 /* Fin de tour automatique : la pastille se vide comme une jauge */
 .pill.auto-end { background: linear-gradient(90deg, #c9a24a55 calc(var(--p, 1) * 100%), transparent 0) , var(--panel-2); transition: background .25s linear; }
 .pill.ghost { background: transparent; border-style: dashed; }
+
+/* ================= Accueil : galerie des suspects ================= */
+.home { position: fixed; inset: 0; overflow: hidden auto; background: #0d0806; color: var(--ink-light, #f3e7cc); }
+.home-hero { position: absolute; inset: 0 0 auto 0; height: 66vh; overflow: hidden; touch-action: pan-y; }
+.home-slide { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 22%; opacity: 0; transform: scale(1.08); transition: opacity 1.2s ease, transform 7s ease-out; user-select: none; -webkit-user-drag: none; }
+.home-slide.on { opacity: 1; transform: scale(1); }
+.home-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(#0d080600 35%, #0d0806 97%), radial-gradient(ellipse at 50% 35%, transparent 50%, #0009); pointer-events: none; }
+.home-top { position: absolute; top: max(28px, env(safe-area-inset-top)); left: 0; right: 0; text-align: center; pointer-events: none; }
+.home-title { font: 800 clamp(46px, 13vw, 76px)/1 var(--font-title); letter-spacing: 3px; color: transparent; background: linear-gradient(#fff1c2, #d8b25a 50%, #8a6420); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 3px 8px #000); }
+.home-hello { font: italic 15px var(--font-title); color: #efe0bb; text-shadow: 0 1px 4px #000; margin-top: 4px; }
+.home-resume { position: absolute; top: calc(max(28px, env(safe-area-inset-top)) + 96px); left: 16px; right: 16px; display: flex; gap: 6px; }
+.home-resume-go { flex: 1; padding: 10px 12px; border-radius: 12px; background: #000b; border: 1px solid var(--accent); color: #f3e7cc; font-size: 14px; text-align: left; }
+.home-resume-go b { color: var(--accent-light); letter-spacing: 1px; }
+.home-resume-x { width: 40px; border-radius: 12px; background: #000b; border: 1px solid #fff3; color: #fff9; }
+.home-quote { position: absolute; left: 20px; right: 20px; top: calc(66vh - 150px); font: italic clamp(17px, 4.8vw, 22px)/1.3 var(--font-title); color: #fff; text-shadow: 0 2px 10px #000; opacity: 0; transform: translateY(8px); transition: opacity .6s, transform .6s; pointer-events: none; }
+.home-quote.in { opacity: 1; transform: none; }
+.home-quote small { display: block; margin-top: 6px; font: 600 12px var(--font-body, Lora); color: var(--accent-light); letter-spacing: 1.5px; text-transform: uppercase; font-style: normal; }
+.home-thumbs { position: absolute; top: calc(66vh - 38px); left: 16px; right: 16px; display: flex; gap: 8px; justify-content: space-between; }
+.home-thumb { flex: 1; max-width: 64px; aspect-ratio: 5 / 6; padding: 0; background: none; border: none; opacity: .6; transition: transform .2s, opacity .2s; }
+.home-thumb .portrait { width: 100%; height: 100%; }
+.home-thumb.on { opacity: 1; transform: translateY(-5px) scale(1.08); }
+.home-menu { position: relative; margin-top: calc(66vh + 46px); padding: 0 16px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; max-width: 520px; margin-left: auto; margin-right: auto; }
+.home-btn { width: 100%; padding: 15px; border-radius: 14px; font: 700 18px var(--font-title); border: 2px solid var(--accent-dark); background: #24170f; color: #f3e7cc; }
+.home-btn.primary { background: linear-gradient(#f3d98c, #c9a24a 55%, #a07a2a); color: #2a1608; border-color: #f3d98c; box-shadow: 0 6px 18px #c9a24a44; }
+.home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.home-grid .home-btn { font-size: 15px; padding: 12px 8px; }
+.home-sheet-bg { position: fixed; inset: 0; background: #000a; z-index: 40; }
+.home-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; max-height: 86vh; overflow: auto; padding: 22px 18px max(22px, env(safe-area-inset-bottom)); background: var(--panel); border-top: 2px solid var(--accent); border-radius: 22px 22px 0 0; display: flex; flex-direction: column; gap: 12px; animation: sheet-up .25s ease-out; max-width: 560px; margin: 0 auto; }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
+.home-sheet h2 { margin: 0; }
+.home-label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+.home-label input { width: 100%; font-size: 18px; padding: 12px; }
+.code-input { text-transform: uppercase; letter-spacing: 6px; text-align: center; font-weight: 700; }
+.rules p { margin: 0 0 10px; line-height: 1.45; }
+.home .install { margin-top: 4px; }
+@media (min-width: 900px) {
+  .home-hero { height: 100vh; width: 55%; }
+  .home-hero::after { background: linear-gradient(90deg, #0d080600 60%, #0d0806), radial-gradient(ellipse at 50% 35%, transparent 50%, #0008); }
+  .home-quote { top: auto; bottom: 120px; width: 50%; }
+  .home-thumbs { top: auto; bottom: 36px; width: 50%; right: auto; }
+  .home-menu { margin: 0 6% 0 auto; width: 40%; min-height: 100vh; justify-content: center; }
+  .home-top { width: 55%; }
+  .home-resume { left: auto; right: 6%; width: 40%; }
+}
+.home-sheet[hidden], .home-sheet-bg[hidden] { display: none; }
+@media (min-width: 900px) {
+  .home-thumbs { justify-content: flex-start; gap: 12px; }
+  .home-thumb { max-width: 58px; }
+  .home-quote { bottom: 130px; }
+}

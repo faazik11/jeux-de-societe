@@ -5,10 +5,9 @@ import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
 import { portraitHTML } from '../games/cluedo/ui/cards';
 import { variantChecked, variantHTML } from './variants';
 import { ensureSignedIn, multiTabTest } from '../online/firebase';
-import { renderInstall } from '../pwa';
+import { renderHomeScreen } from './home';
 import {
   chooseSuspect,
-  createRoom,
   disconnectedPlayers,
   joinRoom,
   leaveRoom,
@@ -35,77 +34,20 @@ export function savedName(): string {
   return store.get(NAME_KEY) ?? '';
 }
 
-/** Écran d'accueil du jeu en ligne. */
+const LAST_KEY = 'jds:lastRoom';
+
+/** Écran d'accueil (galerie des suspects + menu). */
 export function renderHome(app: HTMLElement, go: (hash: string) => void, error = '') {
-  app.innerHTML = `
-    <h1>🔎 Enquête</h1>
-    <p class="muted">Jeu d'enquête en ligne, de 2 à 6 joueurs.</p>
-    <div class="panel">
-      <h2>Ton prénom</h2>
-      <input id="name" maxlength="20" placeholder="Ton prénom" value="${esc(savedName())}" style="width:100%" />
-    </div>
-    <div class="panel">
-      <h2>Créer une partie</h2>
-      <p class="muted">Tu seras le maître de jeu et tu recevras un code à partager.</p>
-      <button class="primary" id="create">Créer une partie</button>
-    </div>
-    <div class="panel">
-      <h2>Rejoindre une partie</h2>
-      <div class="row">
-        <input id="code" maxlength="5" placeholder="CODE" style="text-transform:uppercase;letter-spacing:3px;width:130px" />
-        <button class="primary" id="join">Rejoindre</button>
-      </div>
-    </div>
-    <div class="error" id="err">${esc(error)}</div>
-    <div id="install"></div>
-    <p class="muted"><a href="#/test" style="color:var(--muted)">Mode test (tous sur le même écran)</a></p>`;
-
-  renderInstall(app.querySelector<HTMLElement>('#install')!);
-  const nameInput = app.querySelector<HTMLInputElement>('#name')!;
-  const err = app.querySelector<HTMLElement>('#err')!;
-  const getName = () => {
-    const n = nameInput.value.trim();
-    if (!n) {
-      err.textContent = 'Écris ton prénom.';
-      nameInput.focus();
-      return null;
-    }
-    store.set(NAME_KEY, n);
-    return n;
-  };
-  const busy = (b: boolean) => app.querySelectorAll('button').forEach((x) => (x.disabled = b));
-
-  app.querySelector('#create')!.addEventListener('click', async () => {
-    const name = getName();
-    if (!name) return;
-    busy(true);
-    try {
-      const user = await ensureSignedIn();
-      const code = await createRoom(user.uid, name);
-      go(`#/p/${code}`);
-    } catch (e) {
-      err.textContent = message(e);
-      busy(false);
-    }
-  });
-  app.querySelector('#join')!.addEventListener('click', async () => {
-    const name = getName();
-    const code = normalizeCode(app.querySelector<HTMLInputElement>('#code')!.value);
-    if (!name) return;
-    if (code.length !== 5) {
-      err.textContent = 'Le code fait 5 caractères.';
-      return;
-    }
-    busy(true);
-    try {
-      const user = await ensureSignedIn();
-      await joinRoom(user.uid, code, name);
-      go(`#/p/${code}`);
-    } catch (e) {
-      err.textContent = message(e);
-      busy(false);
-    }
-  });
+  renderHomeScreen(app, {
+    go,
+    getName: savedName,
+    setName: (n) => store.set(NAME_KEY, n),
+    lastRoom: () => store.get(LAST_KEY),
+    forgetRoom: () => {
+      try { storage().removeItem(LAST_KEY); } catch { /* ignore */ }
+    },
+    message,
+  }, error);
 }
 
 function message(e: unknown): string {
@@ -144,6 +86,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
       }
       if (stopped) return;
       stopPresence = trackPresence(uid, code);
+      store.set(LAST_KEY, code);
       stopRoom = subscribeRoom(code, (room) => {
         lastRoom = room;
         render();
