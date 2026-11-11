@@ -402,3 +402,6 @@ button.pill.danger { background: linear-gradient(180deg, var(--velvet-light), va
 .sus-taken { position: absolute; top: 6px; right: 6px; font-size: .65rem; background: #000a; padding: 1px 5px; border-radius: 6px; }
 .who-portrait { display: inline-block; width: 30px; height: 36px; vertical-align: middle; }
 .who-portrait .portrait { width: 100%; height: 100%; }
+/* Fin de tour automatique : la pastille se vide comme une jauge */
+.pill.auto-end { background: linear-gradient(90deg, #c9a24a55 calc(var(--p, 1) * 100%), transparent 0) , var(--panel-2); transition: background .25s linear; }
+.pill.ghost { background: transparent; border-style: dashed; }

@@ -163,6 +163,8 @@ interface UiState {
   lastError?: string;
   /** Tour pour lequel l'hypothèse doit s'ouvrir toute seule (dès que le pion est arrivé). */
   pendingSuggest?: number;
+  /** Fin de tour automatique : clé (tour + phase), échéance, annulée par le joueur. */
+  autoEnd?: { key: string; left: number; cancelled: boolean };
   /** Tour pour lequel elle s'est déjà ouverte (on ne la rouvre pas si le joueur la ferme). */
   autoSuggested?: number;
 }
@@ -369,6 +371,47 @@ function onBoardEvent(el: HTMLElement, e: BoardEvent) {
   }
 }
 
+const AUTO_END_MS = 6000;
+const autoTimers = new WeakMap<HTMLElement, number>();
+
+/** Compte à rebours de fin de tour : il ne tourne que quand rien n'est affiché par-dessus le jeu. */
+function startAutoEnd(el: HTMLElement) {
+  if (autoTimers.has(el)) return;
+  const id = window.setInterval(() => {
+    const ui = uiStates.get(el);
+    const o = lastOptions.get(el);
+    const ae = ui?.autoEnd;
+    if (!ui || !o || !ae || ae.cancelled || !el.isConnected) {
+      clearInterval(id);
+      autoTimers.delete(el);
+      return;
+    }
+    const g = o.state;
+    if (`${g.turn}:${g.phase}` !== ae.key || g.currentPlayer !== o.me) {
+      clearInterval(id);
+      autoTimers.delete(el);
+      return;
+    }
+    // En pause tant qu'une annonce, une carte révélée ou un volet est ouvert
+    const busy = ui.showing || ui.queue.length > 0 || !!ui.sheet || !!el.querySelector('.reveal');
+    if (busy) return;
+    ae.left -= 250;
+    const btn = el.querySelector<HTMLElement>('.auto-end');
+    if (btn) {
+      btn.style.setProperty('--p', String(Math.max(0, ae.left) / AUTO_END_MS));
+      const n = btn.querySelector('#auto-left');
+      if (n) n.textContent = String(Math.max(0, Math.ceil(ae.left / 1000)));
+    }
+    if (ae.left <= 0) {
+      clearInterval(id);
+      autoTimers.delete(el);
+      ae.cancelled = true;
+      o.act({ type: 'endTurn', player: o.me });
+    }
+  }, 250);
+  autoTimers.set(el, id);
+}
+
 /** Ouvre le volet « hypothèse » prévu, une fois le pion arrivé et les annonces passées. */
 function openPendingSuggest(el: HTMLElement, delay: number) {
   setTimeout(() => {
@@ -512,6 +555,15 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   ui.lastError = o.error;
 
   // ---------------- Boutons d'action (en bas)
+  // Plus rien d'utile à faire (pas de dés, de déplacement, d'hypothèse ni de passage) : le tour finit tout seul
+  const autoKey = `${g.turn}:${g.phase}`;
+  const nothingLeft =
+    !paused && g.currentPlayer === me && a.endTurn && !a.roll && !a.move && !a.suggest && !a.secretPassage && g.phase !== 'start';
+  if (nothingLeft) {
+    if (!ui.autoEnd || ui.autoEnd.key !== autoKey) ui.autoEnd = { key: autoKey, left: AUTO_END_MS, cancelled: false };
+    startAutoEnd(el);
+  } else if (ui.autoEnd && ui.autoEnd.key !== autoKey) ui.autoEnd = undefined;
+
   const actions = el.querySelector<HTMLElement>('#actions')!;
   let act = '';
   if (g.phase === 'finished') {
@@ -521,7 +573,13 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
     const small: string[] = [];
     if (a.suggest) small.push(`<button class="primary pill glow" data-open="suggest">🔍 Hypothèse</button>`);
     if (a.secretPassage) small.push(`<button class="pill" id="passage">🕳️ Passage → ${getCard(a.secretPassage).name}</button>`);
-    if (a.endTurn) small.push(`<button class="pill" id="end">${g.phase === 'start' ? 'Rester ici' : 'Finir mon tour'}</button>`);
+    const auto = ui.autoEnd && ui.autoEnd.key === autoKey && !ui.autoEnd.cancelled ? ui.autoEnd : null;
+    if (a.endTurn)
+      small.push(
+        auto
+          ? `<button class="pill auto-end" id="end" style="--p:${auto.left / AUTO_END_MS}">Fin du tour dans <b id="auto-left">${Math.ceil(auto.left / 1000)}</b> s</button><button class="pill ghost" id="auto-stop">Attendre</button>`
+          : `<button class="pill" id="end">${g.phase === 'start' ? 'Rester ici' : 'Finir mon tour'}</button>`,
+      );
     if (a.accuse && g.phase !== 'moving') small.push(`<button class="pill danger" data-open="accuse">⚖️ Accuser</button>`);
     if (small.length) act += `<div class="pill-row">${small.join('')}</div>`;
   } else if (a.showCard.length) {
@@ -541,6 +599,10 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
   });
   on(actions, 'passage', () => o.act({ type: 'secretPassage', player: me }));
   on(actions, 'end', () => o.act({ type: 'endTurn', player: me }));
+  on(actions, 'auto-stop', () => {
+    if (ui!.autoEnd) ui!.autoEnd.cancelled = true;
+    renderGame(el, o);
+  });
 
   // ---------------- Volets (en bas)
   const sheet = el.querySelector<HTMLElement>('#sheet')!;
