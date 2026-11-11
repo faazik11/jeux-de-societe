@@ -3,6 +3,7 @@
 import { SUSPECTS, type SuspectId } from '../games/cluedo/engine';
 import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
 import { portraitHTML } from '../games/cluedo/ui/cards';
+import { variantChecked, variantHTML } from './variants';
 import { ensureSignedIn, multiTabTest } from '../online/firebase';
 import { renderInstall } from '../pwa';
 import {
@@ -230,6 +231,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
         }).join('')}</div>
       </div>
       <div class="error">${esc(error)}</div>
+      ${isHost ? variantHTML() : ''}
       ${isHost
         ? `<button class="primary" id="start" ${entries.length < 2 || dupes ? 'disabled' : ''}>Lancer la partie</button>
            <p class="muted">${entries.length < 2 ? 'Il faut au moins 2 joueurs.' : dupes ? 'Deux joueurs ont le même personnage.' : 'Tout le monde est là ? Lance la partie !'}</p>`
@@ -255,7 +257,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
     app.querySelector('#start')?.addEventListener('click', async () => {
       try {
         error = '';
-        await startGame(uid, room);
+        await startGame(uid, room, { weaponInRoom: variantChecked(app) });
       } catch (e) {
         error = message(e);
         render();

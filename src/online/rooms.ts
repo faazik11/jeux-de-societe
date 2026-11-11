@@ -24,7 +24,7 @@ import {
   set,
   update,
 } from 'firebase/database';
-import { SUSPECTS, applyAction, createGame, type Action, type GameState, type SuspectId } from '../games/cluedo/engine';
+import { SUSPECTS, applyAction, createGame, type Action, type GameConfig, type GameState, type SuspectId } from '../games/cluedo/engine';
 import { db } from './firebase';
 
 export type RoomStatus = 'lobby' | 'playing' | 'finished';
@@ -133,13 +133,13 @@ export function subscribeRoom(code: string, cb: (room: Room | null) => void): ()
 }
 
 /** Le maître de jeu lance la partie : le moteur tire la solution et distribue les cartes. */
-export async function startGame(uid: string, room: Room): Promise<void> {
+export async function startGame(uid: string, room: Room, config: Partial<GameConfig> = {}): Promise<void> {
   if (room.hostUid !== uid) throw new Error('Seul le maître de jeu peut lancer la partie.');
   const players = Object.entries(room.players)
     .sort(([, a], [, b]) => a.joinedAt - b.joinedAt)
     .map(([id, p]) => ({ id, name: p.name, suspect: p.suspect as SuspectId }));
   if (players.some((p) => !p.suspect)) throw new Error('Chaque joueur doit choisir un personnage.');
-  const state = createGame({ players, hostId: room.hostUid });
+  const state = createGame({ players, hostId: room.hostUid, config: { diceCount: 2, ...config } });
   await update(ref(db, `rooms/${room.code}`), { state: JSON.stringify(state), status: 'playing' });
 }
 

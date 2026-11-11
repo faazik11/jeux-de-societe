@@ -7,6 +7,7 @@ import {
   getDestinations,
   getPlayerView,
   reachableDestinations,
+  allowedWeapons,
   type CardId,
   type GameState,
   type NewPlayer,
@@ -329,5 +330,35 @@ describe('partie complète simulée', () => {
       expect(g.phase, `graine ${seed}`).toBe('finished');
       expect(g.endReason).toBe('accusation');
     }
+  });
+});
+
+describe('variante « l’arme de la pièce »', () => {
+  const game = () => createGame({ players: FOUR, seed: 7, config: { diceCount: 2, weaponInRoom: true } });
+
+  it('impose l’arme présente dans la pièce', () => {
+    const g0 = game();
+    const [weapon, room] = Object.entries(g0.weapons)[0] as ['corde', 'cuisine'];
+    const g = inRoom(g0, room);
+    expect(allowedWeapons(g, g.currentPlayer)).toEqual([weapon]);
+    const other = (['chandelier', 'poignard', 'tuyau', 'revolver', 'corde', 'cle'] as const).find((w) => w !== weapon)!;
+    expect(() => applyAction(g, { type: 'suggest', player: g.currentPlayer, suspect: 'vert', weapon: other })).toThrow(RuleError);
+    const after = applyAction(g, { type: 'suggest', player: g.currentPlayer, suspect: 'vert', weapon });
+    expect(after.weapons[weapon]).toBe(room);
+  });
+
+  it('dans une pièce sans arme, on choisit librement et l’arme est apportée', () => {
+    const g0 = game();
+    const used = new Set(Object.values(g0.weapons));
+    const empty = (['cuisine', 'bal', 'veranda', 'salleAManger', 'billard', 'bibliotheque', 'salon', 'hall', 'bureau'] as const).find((r) => !used.has(r))!;
+    const g = inRoom(g0, empty);
+    expect(allowedWeapons(g, g.currentPlayer)).toHaveLength(6);
+    const after = applyAction(g, { type: 'suggest', player: g.currentPlayer, suspect: 'vert', weapon: 'corde' });
+    expect(after.weapons.corde).toBe(empty);
+  });
+
+  it('sans la variante, toutes les armes sont permises', () => {
+    const g = inRoom(newGame(), 'cuisine');
+    expect(allowedWeapons(g, g.currentPlayer)).toHaveLength(6);
   });
 });

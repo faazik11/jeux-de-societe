@@ -58,6 +58,11 @@ export interface GameConfig {
   diceCount: number;
   /** Vrai = il faut avancer d'exactement le total des dés (règle stricte). Faux (par défaut) = de 1 à N cases. */
   exactMove?: boolean;
+  /**
+   * Variante « l'arme de la pièce » : l'hypothèse se fait obligatoirement avec l'arme qui se trouve
+   * dans la pièce. Si la pièce n'a pas d'arme, on peut en choisir une, qui y est alors apportée.
+   */
+  weaponInRoom?: boolean;
 }
 
 export interface GameState {

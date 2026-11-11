@@ -17,6 +17,8 @@ import {
   SUSPECTS,
   WEAPONS,
   getAvailableActions,
+  allowedWeapons,
+  type WeaponId,
   getCard,
   getDestinations,
   getPlayerView,
@@ -626,12 +628,17 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
     case 'log':
       content = `<h2>Journal</h2><div class="log">${[...v.log].reverse().map((e) => `<div>${logLine(v, e)}</div>`).join('')}</div>`;
       break;
-    case 'suggest':
+    case 'suggest': {
+      const allowed = allowedWeapons(g, me);
+      const forced = allowed.length < WEAPONS.length;
+      if (forced && allowed.length === 1) ui.sWea = allowed[0];
+      if (ui.sWea && !allowed.includes(ui.sWea as WeaponId)) ui.sWea = undefined;
       content = `<h2>Hypothèse dans : ${myRoom ? getCard(myRoom).name : ''}</h2>
-        <p class="muted">Qui, et avec quoi ? Touche un suspect et une arme.</p>
-        ${picker(SUSPECTS, 'sSus')}${picker(WEAPONS, 'sWea')}
+        <p class="muted">${forced ? `Qui a fait le coup ? L'arme est celle de la pièce : <b>${getCard(allowed[0]).name}</b>.` : g.config.weaponInRoom ? 'Pas d’arme dans cette pièce : choisis-en une, elle y sera apportée.' : 'Qui, et avec quoi ? Touche un suspect et une arme.'}</p>
+        ${picker(SUSPECTS, 'sSus')}${picker(WEAPONS.filter((w) => allowed.includes(w.id as WeaponId)), 'sWea')}
         <div class="row"><button class="primary big" id="suggest" ${ui.sSus && ui.sWea ? '' : 'disabled'}>Proposer l'hypothèse</button></div>`;
       break;
+    }
     case 'accuse':
       content = `<h2>⚖️ Accusation finale</h2>
         <p class="muted">Tu penses avoir trouvé ? Si tu te trompes, tu es éliminé.</p>
@@ -656,7 +663,7 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
       break;
     case 'menu':
       content = `<h2>Menu</h2>
-        <div class="menu-extra">${o.banner ?? ''}</div>
+        <div class="menu-extra">${o.banner ?? ''}${g.config.weaponInRoom ? `<p class="muted">Règle choisie : <b>l'arme de la pièce</b>.</p>` : ''}</div>
         <div class="menu-list">
           ${o.onHome ? `<button id="go-home">← Retour à l'accueil</button>` : ''}
           <button id="open-settings">⚙ Réglages d'affichage</button>

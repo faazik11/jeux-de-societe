@@ -2,6 +2,7 @@
 
 import { RuleError, SUSPECTS, applyAction, createGame, type GameState, type SuspectId } from '../games/cluedo/engine';
 import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
+import { variantChecked, variantHTML } from './variants';
 
 export function startLocal(app: HTMLElement, goHome: () => void) {
   let game: GameState | null = null;
@@ -23,6 +24,7 @@ export function startLocal(app: HTMLElement, goHome: () => void) {
             <select id="sus${i}">${SUSPECTS.map((s, j) => `<option value="${s.id}" ${j === i ? 'selected' : ''}>${s.name}</option>`).join('')}</select>
           </div>`).join('')}
         <p class="muted">Le premier joueur est le maître de jeu.</p>
+        ${variantHTML()}
         <div class="error">${esc(error)}</div>
         <button class="primary" id="start">Lancer la partie</button>
       </div>`;
@@ -38,7 +40,7 @@ export function startLocal(app: HTMLElement, goHome: () => void) {
           name: (app.querySelector(`#name${i}`) as HTMLInputElement).value.trim() || `Joueur ${i + 1}`,
           suspect: (app.querySelector(`#sus${i}`) as HTMLSelectElement).value as SuspectId,
         }));
-        game = createGame({ players });
+        game = createGame({ players, config: { diceCount: 2, weaponInRoom: variantChecked(app) } });
         error = '';
         play();
       } catch (e) {

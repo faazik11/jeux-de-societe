@@ -312,9 +312,23 @@ export function applyAction(state: GameState, action: Action): GameState {
   }
 }
 
+/**
+ * Armes que le joueur peut citer dans son hypothèse.
+ * Règle normale : toutes. Variante « l'arme de la pièce » : celle(s) de la pièce, ou toutes si la pièce est vide.
+ */
+export function allowedWeapons(state: GameState, id: string): WeaponId[] {
+  const all = WEAPONS.map((w) => w.id as WeaponId);
+  if (!state.config.weaponInRoom) return all;
+  const room = currentRoom(state, id);
+  if (!room) return all;
+  const here = all.filter((w) => state.weapons[w] === room);
+  return here.length ? here : all;
+}
+
 function suggest(s: GameState, by: string, suspect: SuspectId, weapon: WeaponId): GameState {
   if (!isSuspect(suspect) || !isWeapon(weapon)) throw new RuleError('Hypothèse invalide.');
   const room = currentRoom(s, by)!;
+  if (!allowedWeapons(s, by).includes(weapon)) throw new RuleError('Avec cette règle, l’hypothèse se fait avec l’arme de la pièce.');
 
   // Le pion du suspect et l'arme sont amenés dans la pièce
   const target: Position = { type: 'room', room };
