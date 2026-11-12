@@ -455,3 +455,66 @@ button.pill.danger { background: linear-gradient(180deg, var(--velvet-light), va
   .home-thumb { max-width: 58px; }
   .home-quote { bottom: 130px; }
 }
+
+/* ================= Ludothèque (accueil principal) ================= */
+.lib { position: fixed; inset: 0; overflow: hidden auto; color: #f3e7cc;
+  background:
+    radial-gradient(ellipse at 50% 0%, #ffe3a01f, transparent 55%),
+    radial-gradient(ellipse at 50% 120%, #00000099, transparent 60%),
+    repeating-linear-gradient(0deg, #0000 0 3px, #ffffff05 3px 4px),
+    radial-gradient(circle at 30% 40%, #1f4a35, #143325 60%, #0c2218);
+}
+.lib::before { content: ""; position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 14px #4a2a16, inset 0 0 0 17px #8a6420, inset 0 0 80px #000c; }
+.lib-deco .deco { position: fixed; filter: drop-shadow(3px 6px 4px #0008); pointer-events: none; opacity: .9; }
+.d1 { width: 46px; top: 9%; right: 7%; transform: rotate(18deg); }
+.d2 { width: 38px; top: 15%; right: 18%; transform: rotate(-12deg); }
+.p1 { width: 26px; bottom: 7%; left: 7%; transform: rotate(-6deg); }
+.p2 { width: 22px; bottom: 9%; left: 15%; }
+.t1 { width: 34px; top: 12%; left: 8%; }
+.c1 { width: 34px; bottom: 6%; right: 9%; transform: rotate(22deg); }
+.lib-head { position: relative; text-align: center; padding: max(46px, env(safe-area-inset-top)) 20px 10px; }
+.lib-title { font: 800 clamp(40px, 11vw, 64px)/1 var(--font-title); letter-spacing: 2px; color: transparent; background: linear-gradient(#fff1c2, #d8b25a 50%, #8a6420); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 3px 6px #000); }
+.lib-sub { margin-top: 8px; font: italic 16px var(--font-title); color: #e9dbb8; }
+.lib-shelf { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 16px; padding: 22px 26px 30px; max-width: 900px; margin: 0 auto; }
+@media (min-width: 720px) { .lib-shelf { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 30px 26px; } }
+.box { position: relative; display: flex; flex-direction: column; padding: 0; background: none; border: none; color: inherit; text-align: left; perspective: 700px; }
+.box-lid { position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; box-shadow: 0 2px 0 #00000040, 6px 10px 0 -2px #0000004d, 0 14px 22px #000a; transform: rotateX(8deg); transform-origin: 50% 100%; transition: transform .25s, box-shadow .25s; }
+.box[data-route]:hover .box-lid, .box[data-route]:focus-visible .box-lid { transform: rotateX(0) translateY(-6px); box-shadow: 0 22px 30px #000c; }
+.box.opening .box-lid { transform: translateY(-30px) rotateX(-25deg); opacity: .4; transition: transform .38s ease-in, opacity .38s; }
+.box-side { height: 10px; margin: 0 4px; border-radius: 0 0 4px 4px; background: linear-gradient(#5a1520, #3a0d14); box-shadow: 0 6px 10px #0009; }
+.box-info { padding: 10px 2px 0; }
+.box-title { font: 700 19px var(--font-title); }
+.box-tag { font: italic 13px var(--font-title); color: #d9c9a2; margin-top: 2px; }
+.box-meta { display: flex; gap: 10px; margin-top: 6px; font-size: 12px; color: #c9b88f; }
+/* Couvercle du jeu d'enquête */
+.lid-cluedo { position: absolute; inset: 0; background: radial-gradient(circle at 50% 35%, #8a2433, #5a1520 60%, #2e0a10); }
+.lid-cluedo::after { content: ""; position: absolute; inset: 6px; border: 2px solid #d8b25a; border-radius: 4px; pointer-events: none; }
+.lid-portraits { position: absolute; top: 14%; left: 0; right: 0; display: flex; justify-content: center; }
+.lid-portraits img { width: 30%; aspect-ratio: 3 / 4; object-fit: cover; border: 3px solid #f4ecd8; border-bottom-width: 9px; box-shadow: 0 4px 8px #000a; margin: 0 -4%; }
+.lid-portraits img:nth-child(1) { transform: rotate(-9deg) translateY(6%); }
+.lid-portraits img:nth-child(2) { transform: translateY(-4%); z-index: 1; }
+.lid-portraits img:nth-child(3) { transform: rotate(9deg) translateY(6%); }
+.lid-env { position: absolute; width: 30%; left: 9%; bottom: 22%; transform: rotate(-10deg); filter: drop-shadow(0 3px 3px #0008); }
+.lid-lens { position: absolute; width: 28%; right: 9%; bottom: 20%; filter: drop-shadow(0 3px 3px #0008); }
+.lid-name { position: absolute; left: 0; right: 0; bottom: 7%; text-align: center; font: 800 clamp(20px, 6vw, 30px) var(--font-title); letter-spacing: 1px; color: transparent; background: linear-gradient(#fff1c2, #d8b25a 55%, #9a7228); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 2px 3px #000); }
+/* Cases libres */
+.box.empty .box-lid { background: #0003; border: 2px dashed #d8b25a66; box-shadow: none; transform: none; display: flex; align-items: center; justify-content: center; }
+.empty-mark { width: 54px; height: 54px; border-radius: 50%; border: 2px dashed #d8b25a88; display: flex; align-items: center; justify-content: center; font: 300 34px var(--font-title); color: #d8b25aaa; }
+.box.empty .box-title { color: #cdbd96; }
+.box.empty .box-tag { color: #a99a76; }
+.lib-foot { max-width: 520px; margin: 0 auto; padding: 0 20px max(30px, env(safe-area-inset-bottom)); }
+/* Retour à la ludothèque depuis l'accueil d'un jeu */
+.home-back { position: absolute; z-index: 3; top: max(14px, env(safe-area-inset-top)); left: 12px; padding: 6px 12px; border-radius: 20px; background: #000a; border: 1px solid #d8b25a88; color: #f3e7cc; font: 600 13px var(--font-title); }
+/* Ajustements : décor derrière le contenu, loin du titre */
+.lib-deco .deco { z-index: 0; opacity: .75; }
+.lib-head, .lib-shelf, .lib-foot { position: relative; z-index: 1; }
+.d1 { top: auto; bottom: 18%; right: 3%; width: 40px; }
+.d2 { top: auto; bottom: 26%; right: 10%; width: 32px; }
+.t1 { top: 3.5%; left: 6%; width: 28px; }
+.p1 { bottom: 3%; left: 5%; }
+.p2 { bottom: 4%; left: 12%; }
+.c1 { bottom: 3%; right: 6%; }
+@media (max-width: 719px) { .d1, .d2 { bottom: 40%; } }
+/* Accueil du Cluedo : le titre descend sous le bouton « Ludothèque » */
+.home-top { top: calc(max(28px, env(safe-area-inset-top)) + 34px); }
+.home-resume { top: calc(max(28px, env(safe-area-inset-top)) + 128px); }

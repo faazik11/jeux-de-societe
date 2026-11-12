@@ -9,6 +9,7 @@ import { setupAudioUnlock } from './games/cluedo/ui/sound';
 import { applyCharteCss } from './theme/charte';
 import './pwa';
 import { renderHome, startOnline } from './screens/online';
+import { renderLibrary } from './screens/library';
 import { startLocal } from './screens/local';
 import { destroyGameView } from './games/cluedo/ui/gameView';
 
@@ -29,8 +30,9 @@ function route() {
   const hash = location.hash || '#/';
   const room = hash.match(/^#\/p\/([A-Za-z0-9]{5})$/);
   if (room) cleanup = startOnline(app, room[1], go);
-  else if (hash === '#/test') startLocal(app, () => go('#/'));
-  else renderHome(app, go);
+  else if (hash === '#/test') startLocal(app, () => go('#/cluedo'));
+  else if (hash === '#/cluedo') renderHome(app, go);
+  else renderLibrary(app, go);
   window.scrollTo(0, 0);
 }
 

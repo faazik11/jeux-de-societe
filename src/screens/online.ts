@@ -101,13 +101,13 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
     if (!room) {
       destroyGameView(app);
       app.innerHTML = `<p>Aucune partie avec le code <b>${esc(code)}</b>.</p><button id="home">← Accueil</button>`;
-      app.querySelector('#home')!.addEventListener('click', () => go('#/'));
+      app.querySelector('#home')!.addEventListener('click', () => go('#/cluedo'));
       return;
     }
     if (!room.players[uid]) {
       destroyGameView(app);
       app.innerHTML = `<p>${esc(error || 'Tu ne fais pas partie de cette partie.')}</p><button id="home">← Accueil</button>`;
-      app.querySelector('#home')!.addEventListener('click', () => go('#/'));
+      app.querySelector('#home')!.addEventListener('click', () => go('#/cluedo'));
       return;
     }
     if (room.status === 'lobby' || !room.state) return renderLobby(room);
@@ -119,7 +119,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
       error,
       pausedBy: offline,
       banner: `<p class="muted">Partie <b>${esc(code)}</b> · partage ce code pour inviter.</p>`,
-      onHome: () => go('#/'),
+      onHome: () => go('#/cluedo'),
       act: async (action) => {
         try {
           await sendAction(code, action);
@@ -129,9 +129,9 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
           render();
         }
       },
-      onExit: { label: 'Retour à l’accueil', run: () => go('#/') },
+      onExit: { label: 'Retour à l’accueil', run: () => go('#/cluedo') },
     });
-    app.querySelector('#home')?.addEventListener('click', () => go('#/'));
+    app.querySelector('#home')?.addEventListener('click', () => go('#/cluedo'));
   };
 
   const renderLobby = (room: Room) => {
@@ -181,7 +181,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
         : '<p class="muted">En attente du maître de jeu pour lancer la partie…</p>'}
       <div class="row"><button class="danger" id="leave">Quitter le salon</button></div>`;
 
-    app.querySelector('#home')!.addEventListener('click', () => go('#/'));
+    app.querySelector('#home')!.addEventListener('click', () => go('#/cluedo'));
     app.querySelector('#share')!.addEventListener('click', async () => {
       const msg = app.querySelector('#shareMsg')!;
       try {
@@ -208,7 +208,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
     });
     app.querySelector('#leave')!.addEventListener('click', async () => {
       await leaveRoom(uid, code).catch(() => {});
-      go('#/');
+      go('#/cluedo');
     });
   };
 

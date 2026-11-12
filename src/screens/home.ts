@@ -41,6 +41,7 @@ export function renderHomeScreen(app: HTMLElement, d: HomeDeps, error = '') {
     <div class="home-hero">
       ${SUSPECTS.map((s, i) => `<img class="home-slide ${i === idx ? 'on' : ''}" data-i="${i}" src="${cardImage(s.id) ?? ''}" alt="">`).join('')}
     </div>
+    <button class="home-back" id="back" aria-label="Retour à la ludothèque">‹ Ludothèque</button>
     <div class="home-top">
       <div class="home-title">Cluedo</div>
       ${name ? `<div class="home-hello">Bonsoir, ${esc(name)}.</div>` : ''}
@@ -119,6 +120,7 @@ export function renderHomeScreen(app: HTMLElement, d: HomeDeps, error = '') {
     d.forgetRoom();
     renderHomeScreen(app, d);
   });
+  app.querySelector('#back')!.addEventListener('click', () => d.go('#/'));
   app.querySelector('#practice')!.addEventListener('click', () => d.go('#/test'));
 
   // ---------------- Volets

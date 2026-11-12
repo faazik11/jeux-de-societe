@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png', 'icons/icon.svg'],
       manifest: {
-        name: 'Enquête — jeux de société',
-        short_name: 'Enquête',
+        name: 'Ludothèque — jeux de société',
+        short_name: 'Ludothèque',
         description: "Jeu d'enquête en ligne de 2 à 6 joueurs, avec plateau 3D.",
         lang: 'fr',
         start_url: '/jeux-de-societe/',
