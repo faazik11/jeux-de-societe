@@ -5,6 +5,7 @@
 import { initializeApp } from 'firebase/app';
 import {
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   browserSessionPersistence,
   initializeAuth,
   onAuthStateChanged,
@@ -32,6 +33,8 @@ export const app = initializeApp(firebaseConfig);
 export const multiTabTest = new URLSearchParams(location.search).has('multi');
 export const auth = initializeAuth(app, {
   persistence: multiTabTest ? browserSessionPersistence : browserLocalPersistence,
+  // Nécessaire pour la connexion Google (fenêtre ou redirection)
+  popupRedirectResolver: browserPopupRedirectResolver,
 });
 export const db = getDatabase(app);
 

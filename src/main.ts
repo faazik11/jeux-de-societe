@@ -11,11 +11,13 @@ import './pwa';
 import { renderHome, startOnline } from './screens/online';
 import { renderLibrary } from './screens/library';
 import { startAccount, startMessages } from './screens/account';
+import { finishRedirect } from './online/account';
 import { startLocal } from './screens/local';
 import { destroyGameView } from './games/cluedo/ui/gameView';
 
 applyCharteCss();
 setupAudioUnlock();
+void finishRedirect();
 const app = document.getElementById('app')!;
 let cleanup: (() => void) | null = null;
 

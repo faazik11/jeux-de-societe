@@ -13,7 +13,11 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   linkWithCredential,
+  getRedirectResult,
   linkWithPopup,
+  linkWithRedirect,
+  signInWithCredential,
+  signInWithRedirect,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -79,15 +83,38 @@ export function onUser(fn: (u: User | null) => void): () => void {
  */
 export async function signInGoogle(): Promise<User> {
   const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
   const cur = auth.currentUser;
-  if (cur?.isAnonymous) {
-    try {
-      return (await linkWithPopup(cur, provider)).user;
-    } catch (e) {
-      if (code(e) !== 'auth/credential-already-in-use') throw e;
+  try {
+    if (cur?.isAnonymous) {
+      try {
+        return (await linkWithPopup(cur, provider)).user;
+      } catch (e) {
+        if (code(e) !== 'auth/credential-already-in-use') throw e;
+      }
     }
+    return (await signInWithPopup(auth, provider)).user;
+  } catch (e) {
+    // Fenêtre bloquée ou impossible (appli installée sur iPhone…) : on passe par une redirection
+    if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(code(e))) {
+      if (cur?.isAnonymous) await linkWithRedirect(cur, provider);
+      else await signInWithRedirect(auth, provider);
+    }
+    throw e;
   }
-  return (await signInWithPopup(auth, provider)).user;
+}
+
+/** Au retour d'une connexion par redirection : crée le profil si besoin. */
+export async function finishRedirect(): Promise<void> {
+  try {
+    const res = await getRedirectResult(auth);
+    if (res?.user) await ensureProfile(res.user);
+  } catch (e) {
+    if (code(e) === 'auth/credential-already-in-use') {
+      const cred = GoogleAuthProvider.credentialFromError(e as never);
+      if (cred) await ensureProfile((await signInWithCredential(auth, cred)).user);
+    } else console.warn(e);
+  }
 }
 
 export async function signUpEmail(email: string, password: string, name: string): Promise<User> {
@@ -123,6 +150,7 @@ export function authError(e: unknown): string {
     case 'auth/popup-blocked': return 'La fenêtre de connexion a été bloquée par le navigateur.';
     case 'auth/operation-not-allowed': return 'Ce mode de connexion n’est pas encore activé dans Firebase.';
     case 'auth/unauthorized-domain': return 'Ce site n’est pas autorisé dans Firebase (domaines autorisés).';
+    case 'auth/argument-error': return 'Erreur de configuration de la connexion. Recharge la page et réessaie.';
     case 'auth/too-many-requests': return 'Trop d’essais : réessaie dans quelques minutes.';
     case 'auth/network-request-failed': return 'Pas de connexion internet.';
     default: return e instanceof Error ? e.message : String(e);
