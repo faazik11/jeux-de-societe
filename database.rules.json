@@ -21,10 +21,18 @@
         "players": {
           "$uid": {
             ".write": "auth != null && $uid === auth.uid && (data.exists() || newData.parent().parent().child('status').val() === 'lobby')",
-            "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
-            "suspect": { ".validate": "newData.isString()" },
-            "joinedAt": { ".validate": "newData.isNumber()" },
-            "$other": { ".validate": false }
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+            },
+            "suspect": {
+              ".validate": "newData.isString()"
+            },
+            "joinedAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "presence": {
@@ -37,7 +45,75 @@
           ".write": "auth != null && newData.parent().child('players').child(auth.uid).exists()",
           ".validate": "newData.isString() && newData.val().length < 500000"
         },
-        "$other": { ".validate": false }
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        "name": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20"
+        },
+        "avatar": {
+          ".validate": "newData.isString() && newData.val().length <= 20"
+        },
+        "friendCode": {
+          ".validate": "newData.isString() && root.child('friendCodes').child(newData.val()).val() === $uid"
+        }
+      }
+    },
+    "friendCodes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists() && newData.val() === auth.uid",
+        ".validate": "$code.length === 6"
+      }
+    },
+    "friendRequests": {
+      "$to": {
+        ".read": "auth != null && auth.uid === $to",
+        "$from": {
+          ".write": "auth != null && (auth.uid === $from || auth.uid === $to)",
+          ".validate": "newData.val() === true"
+        }
+      }
+    },
+    "friends": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$other": {
+          ".write": "auth != null && (auth.uid === $uid || (auth.uid === $other && (!newData.exists() || root.child('friendRequests').child($other).child($uid).exists() || root.child('friendRequests').child($uid).child($other).exists())))",
+          ".validate": "newData.val() === true"
+        }
+      }
+    },
+    "dm": {
+      "$pair": {
+        ".read": "auth != null && ($pair.beginsWith(auth.uid + '_') || $pair.endsWith('_' + auth.uid))",
+        "$msg": {
+          ".write": "auth != null && !data.exists() && ($pair.beginsWith(auth.uid + '_') || $pair.endsWith('_' + auth.uid))",
+          ".validate": "newData.child('from').val() === auth.uid && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500 && newData.child('at').isNumber()"
+        }
+      }
+    },
+    "inbox": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$other": {
+          ".write": "auth != null && (auth.uid === $uid || auth.uid === $other)",
+          "last": {
+            ".validate": "newData.isString() && newData.val().length <= 500"
+          },
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "unread": {
+            ".validate": "newData.isNumber() && (auth.uid === $uid ? newData.val() === 0 : newData.val() >= 0)"
+          }
+        }
       }
     }
   }

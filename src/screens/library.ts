@@ -4,6 +4,9 @@
 import { cardImage } from '../games/cluedo/ui/cards';
 import { play } from '../games/cluedo/ui/sound';
 import { renderInstall } from '../pwa';
+import { hasAccount, onUser, watchInbox, watchProfile } from '../online/account';
+import { portraitHTML } from '../games/cluedo/ui/cards';
+import type { CardId } from '../games/cluedo/engine';
 
 interface GameEntry {
   id: string;
@@ -47,7 +50,7 @@ function savedName(): string {
   }
 }
 
-export function renderLibrary(app: HTMLElement, go: (hash: string) => void) {
+export function renderLibrary(app: HTMLElement, go: (hash: string) => void): () => void {
   const name = savedName();
   const free = Math.max(1, SLOTS - GAMES.length);
   const hour = new Date().getHours();
@@ -64,6 +67,10 @@ export function renderLibrary(app: HTMLElement, go: (hash: string) => void) {
       <svg class="deco card c1" viewBox="0 0 40 56"><rect x="1" y="1" width="38" height="54" rx="5" fill="#6b1e2a" stroke="#d8b25a" stroke-width="2"/><text x="20" y="35" text-anchor="middle" font-size="22" fill="#d8b25a" font-family="Georgia">?</text></svg>
     </div>
 
+    <nav class="lib-nav">
+      <button class="lib-chip" id="msgs" aria-label="Messages">💬<span class="badge" id="unread" hidden></span></button>
+      <button class="lib-chip lib-me" id="me"><span class="lib-me-av" id="me-av"></span><span id="me-name">Se connecter</span></button>
+    </nav>
     <header class="lib-head">
       <div class="lib-title">Ludothèque</div>
       <div class="lib-sub">${hello}${name ? `, ${esc(name)}` : ''}. À quoi on joue ce soir ?</div>
@@ -103,4 +110,40 @@ export function renderLibrary(app: HTMLElement, go: (hash: string) => void) {
       setTimeout(() => go(b.dataset.route!), 380);
     }),
   );
+  app.querySelector('#me')!.addEventListener('click', () => go('#/compte'));
+  app.querySelector('#msgs')!.addEventListener('click', () => go('#/messages'));
+
+  // Compte : nom, portrait et messages non lus
+  let subs: (() => void)[] = [];
+  const stopUser = onUser((u) => {
+    subs.forEach((f) => f());
+    subs = [];
+    const nameEl = app.querySelector<HTMLElement>('#me-name');
+    const av = app.querySelector<HTMLElement>('#me-av');
+    const badge = app.querySelector<HTMLElement>('#unread');
+    if (!nameEl || !av || !badge) return;
+    if (!hasAccount(u)) {
+      nameEl.textContent = 'Se connecter';
+      av.innerHTML = '👤';
+      badge.hidden = true;
+      return;
+    }
+    subs.push(
+      watchProfile(u.uid, (p) => {
+        nameEl.textContent = p?.name ?? 'Mon compte';
+        av.innerHTML = p?.avatar ? portraitHTML(p.avatar as CardId) : '👤';
+        const sub = app.querySelector('.lib-sub');
+        if (sub && p?.name) sub.textContent = `${hello}, ${p.name}. À quoi on joue ce soir ?`;
+      }),
+      watchInbox(u.uid, (entries) => {
+        const n = entries.reduce((a, e) => a + (e.unread || 0), 0);
+        badge.hidden = n === 0;
+        badge.textContent = String(n);
+      }),
+    );
+  });
+  return () => {
+    subs.forEach((f) => f());
+    stopUser();
+  };
 }

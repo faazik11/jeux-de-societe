@@ -35,18 +35,23 @@ export const auth = initializeAuth(app, {
 });
 export const db = getDatabase(app);
 
-/** Connexion anonyme : chaque appareil reçoit un identifiant stable, sans créer de compte. */
-export function ensureSignedIn(): Promise<User> {
-  return new Promise((resolve, reject) => {
+/** Attend que Firebase ait retrouvé la session enregistrée (ou constaté qu'il n'y en a pas). */
+export function authReady(): Promise<User | null> {
+  return new Promise((resolve) => {
     const stop = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        stop();
-        resolve(user);
-      }
-    });
-    signInAnonymously(auth).catch((e) => {
       stop();
-      reject(e);
+      resolve(user);
     });
   });
+}
+
+/**
+ * Identité du joueur : son compte s'il est connecté, sinon une connexion anonyme
+ * (identifiant stable sur l'appareil, sans compte). Un invité peut ensuite créer un compte
+ * en gardant le même identifiant (voir account.ts).
+ */
+export async function ensureSignedIn(): Promise<User> {
+  const current = await authReady();
+  if (current) return current;
+  return (await signInAnonymously(auth)).user;
 }

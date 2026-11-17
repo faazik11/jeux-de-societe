@@ -45,6 +45,10 @@ export interface GameViewOptions {
   onExit?: { label: string; run: () => void };
   /** Retour à l'accueil (bouton du menu). */
   onHome?: () => void;
+  /** Toucher le portrait d'un autre joueur (messages privés). */
+  onPlayerTap?: (playerId: string) => void;
+  /** Messages privés non lus, par joueur. */
+  unread?: Record<string, number>;
 }
 
 const MARKS = ['', '✗', '✓', '?'];
@@ -536,12 +540,16 @@ export function renderGame(el: HTMLElement, o: GameViewOptions) {
       const s = SUSPECTS.find((x) => x.id === p.suspect)!;
       const active = g.phase !== 'finished' && (p.id === g.currentPlayer || (g.phase === 'refuting' && g.pending?.refuter === p.id));
       const off = o.pausedBy?.includes(p.name);
-      return `<div class="pl ${active ? 'active' : ''} ${p.eliminated ? 'out' : ''} ${p.id === me ? 'me' : ''}">
+      const unread = o.unread?.[p.id] ?? 0;
+      const tappable = !!o.onPlayerTap && p.id !== me;
+      return `<div class="pl ${active ? 'active' : ''} ${p.eliminated ? 'out' : ''} ${p.id === me ? 'me' : ''} ${tappable ? 'tappable' : ''}" ${tappable ? `data-pid="${p.id}" role="button" title="Message privé à ${esc(p.name)}"` : ''}>
+        ${unread ? `<span class="badge pl-badge">${unread}</span>` : tappable ? '<span class="pl-dm">💬</span>' : ''}
         <div class="pl-avatar" title="${s.name}">${portraitHTML(s.id)}</div>
         <div class="pl-name">${p.id === me ? 'Toi' : esc(p.name)}${off ? ' 📴' : ''}</div>
         <div class="pl-cards"><i class="mini-card"></i>${p.handSize}</div></div>`;
     })
     .join('');
+  players.querySelectorAll<HTMLElement>('[data-pid]').forEach((b) => b.addEventListener('click', () => o.onPlayerTap?.(b.dataset.pid!)));
 
   // ---------------- Ligne d'état (petit texte sous la barre)
   const status = el.querySelector<HTMLElement>('#status')!;

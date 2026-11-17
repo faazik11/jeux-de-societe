@@ -4,8 +4,11 @@ import { SUSPECTS, type SuspectId } from '../games/cluedo/engine';
 import { destroyGameView, esc, renderGame } from '../games/cluedo/ui/gameView';
 import { portraitHTML } from '../games/cluedo/ui/cards';
 import { variantChecked, variantHTML } from './variants';
-import { ensureSignedIn, multiTabTest } from '../online/firebase';
+import { auth, ensureSignedIn, multiTabTest } from '../online/firebase';
 import { renderHomeScreen } from './home';
+import { mountConversation } from './dm';
+import { getProfile, hasAccount, recordGame, watchInbox } from '../online/account';
+import { play } from '../games/cluedo/ui/sound';
 import {
   chooseSuspect,
   disconnectedPlayers,
@@ -66,6 +69,38 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
   let error = '';
   let lastRoom: Room | null = null;
   let uid = '';
+  // Messages privés : non lus par joueur, conversation ouverte
+  let unread: Record<string, number> = {};
+  let lastAt: Record<string, number> = {};
+  let stopInbox: (() => void) | null = null;
+  let dmWith: string | null = null;
+  let stopDM: (() => void) | null = null;
+  let recorded = false;
+
+  const closeDM = () => {
+    stopDM?.();
+    stopDM = null;
+    dmWith = null;
+    document.querySelector('.dm-overlay')?.remove();
+  };
+  const openDM = (other: string) => {
+    closeDM();
+    const room = lastRoom;
+    const p = room?.players[other];
+    dmWith = other;
+    const ov = document.createElement('div');
+    ov.className = 'dm-overlay';
+    ov.innerHTML = '<div class="dm-backdrop"></div><div class="dm-sheet"></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('.dm-backdrop')!.addEventListener('click', closeDM);
+    stopDM = mountConversation(ov.querySelector<HTMLElement>('.dm-sheet')!, {
+      me: uid,
+      other,
+      name: p?.name,
+      avatar: p?.suspect ?? undefined,
+      onClose: closeDM,
+    });
+  };
 
   app.innerHTML = '<p class="muted">Connexion…</p>';
 
@@ -76,6 +111,7 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
       if (stopped) return;
       // Si on arrive par un lien partagé sans avoir encore donné son prénom, on le demande
       let name = savedName();
+      if (!name && hasAccount(user)) name = (await getProfile(user.uid))?.name ?? '';
       if (!name) name = await askName(app);
       if (stopped) return;
       try {
@@ -87,6 +123,20 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
       if (stopped) return;
       stopPresence = trackPresence(uid, code);
       store.set(LAST_KEY, code);
+      let first = true;
+      stopInbox = watchInbox(uid, (entries) => {
+        unread = {};
+        for (const e of entries) {
+          unread[e.other] = e.unread;
+          // Nouveau message d'un joueur de la partie, conversation fermée : petite bulle
+          if (!first && e.unread > 0 && e.at > (lastAt[e.other] ?? 0) && dmWith !== e.other && lastRoom?.players[e.other]) {
+            dmToast(lastRoom.players[e.other].name, e.last, () => openDM(e.other));
+          }
+          lastAt[e.other] = e.at;
+        }
+        first = false;
+        if (lastRoom?.state) render();
+      });
       stopRoom = subscribeRoom(code, (room) => {
         lastRoom = room;
         render();
@@ -130,8 +180,17 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
         }
       },
       onExit: { label: 'Retour à l’accueil', run: () => go('#/cluedo') },
+      onPlayerTap: openDM,
+      unread,
     });
     app.querySelector('#home')?.addEventListener('click', () => go('#/cluedo'));
+    // Fin de partie : victoire ou défaite enregistrée dans le compte (une seule fois)
+    const st = room.state;
+    if (!recorded && st.phase === 'finished' && st.endReason !== 'abandoned' && hasAccount(auth.currentUser)) {
+      recorded = true;
+      const meP = st.players.find((p) => p.id === uid);
+      if (meP) void recordGame(uid, `${code}_${st.solution.suspect}-${st.solution.weapon}-${st.solution.room}`, st.winner === uid, meP.suspect).catch(() => {});
+    }
   };
 
   const renderLobby = (room: Room) => {
@@ -216,7 +275,28 @@ export function startOnline(app: HTMLElement, rawCode: string, go: (hash: string
     stopped = true;
     stopRoom?.();
     stopPresence?.();
+    stopInbox?.();
+    closeDM();
   };
+}
+
+/** Bulle « nouveau message » en haut de l'écran (toucher pour ouvrir la conversation). */
+function dmToast(name: string, text: string, open: () => void) {
+  play('turn');
+  const t = document.createElement('button');
+  t.className = 'dm-toast';
+  t.innerHTML = `<b>💬 ${esc(name)}</b><span>${esc(text.length > 80 ? text.slice(0, 80) + '…' : text)}</span>`;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  const hide = () => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 300);
+  };
+  t.addEventListener('click', () => {
+    hide();
+    open();
+  });
+  setTimeout(hide, 5000);
 }
 
 function askName(app: HTMLElement): Promise<string> {
